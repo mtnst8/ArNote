@@ -1,5 +1,5 @@
 /* ArNote service worker: makes the app installable, loads it fast, and receives things shared from other apps. */
-const VERSION = 'arnote-v2';
+const VERSION = 'arnote-v3';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -27,8 +27,8 @@ self.addEventListener('fetch', e => {
     return;
   }
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;   // API calls go straight to Google
-  // App files: network first (so updates show up), fall back to the cached copy when offline.
-  e.respondWith(fetch(e.request).then(r => {
+  // App files: always ask GitHub for the latest copy (no-cache revalidates), fall back to the cached copy when offline.
+  e.respondWith(fetch(e.request, { cache: 'no-cache' }).then(r => {
     if (r.ok) { const copy = r.clone(); caches.open(VERSION).then(c => c.put(e.request, copy)); }
     return r;
   }).catch(() => caches.match(e.request).then(r => r || caches.match('index.html'))));
