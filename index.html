@@ -264,7 +264,9 @@ function fillReader(frame,id,fresh){
   function put(v){var h=String(v.html||'');
     var extra='<base target="_blank"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{max-width:none!important;padding:14px 16px!important;margin:0!important;word-wrap:break-word}img{max-width:100%!important;height:auto!important}</style>';
     h=/<head[^>]*>/i.test(h)?h.replace(/<head[^>]*>/i,function(m){return m+extra}):extra+h;
-    frame.srcdoc=h;}
+    // Chrome doesn't always redraw when srcdoc changes on an existing frame, so swap in a fresh one
+    var nf=frame.cloneNode(false); nf.removeAttribute('srcdoc'); nf.srcdoc=h;
+    if(frame.isConnected) frame.replaceWith(nf); frame=nf;}
   if(noteCache[id]&&!fresh){put(noteCache[id]);return Promise.resolve(noteCache[id])}
   return call('api_noteView',id).then(function(v){noteCache[id]=v;if(frame.isConnected)put(v);return v});
 }
