@@ -29,6 +29,11 @@ nav button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
 main{max-width:900px;margin:0 auto;padding:12px 14px 120px}
 h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--mute);margin:0}
 .lhead{display:flex;align-items:center;gap:8px;margin:18px 0 8px}.lhead h2{flex:1}
+.crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:2px 4px;margin:18px 0 8px;font-size:15px}
+.crumbs .cr{border:0;background:none;color:var(--acc);cursor:pointer;padding:3px 4px;border-radius:6px;font:inherit}
+.crumbs .cr:hover{background:var(--acc2);text-decoration:underline}
+.crumbs .sep{color:var(--mute)}
+.subtags{margin:-2px 0 10px}
 .list{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .row{padding:7px 12px;border-top:1px solid var(--line);cursor:pointer;display:flex;gap:10px;align-items:center;min-height:38px}
 .row:first-child{border-top:0}.row:hover{background:var(--acc2)}
@@ -499,7 +504,12 @@ function bindHome(){
     call('api_createNote',title,lines.join('\n'),[]).then(function(){sc.value='';return call('api_setScratch','')}).then(function(){return load()}).then(function(){toast('Saved to Inbox');viewHome()}).catch(function(){b.disabled=false})};
 }
 function viewAll(){ var arr=byRecent(S.notes); $('#main').innerHTML=section('All notes ('+arr.length+')',arr); bindRows(); }
-function viewList(o){ S.lastList=o; $('#main').innerHTML=section(esc(o.title),o.notes,o.empty); bindRows(); }
+function viewList(o){ S.lastList=o;
+  if(o.tag){ if(!S.parent.hasOwnProperty(o.tag)){go('tags');return} o.notes=tagNotes(o.tag);
+    $('#main').innerHTML=tagCrumbs(o.tag)+(o.notes.length?'<div class="list">'+o.notes.map(rowHtml).join('')+'</div>':'<p class="muted">No notes with this tag yet.</p>');
+    $$('#main [data-crumb]').forEach(function(b){b.onclick=function(){var c=b.dataset.crumb;if(c)showTag(c);else go('tags')}});
+  } else $('#main').innerHTML=section(esc(o.title),o.notes,o.empty);
+  bindRows(); }
 function isSplit(){return window.innerWidth>=900}
 function inboxList(){return byRecent(S.notes.filter(function(n){return n.notebook==='Inbox'}))}
 function viewInboxSplit(){
@@ -636,8 +646,18 @@ function tagRow(t,d,state,extra){
     '<button class="tw'+(state?'':' leaf')+'" aria-label="expand">'+(state==='open'?'▾':'▸')+'</button>'+
     '<span class="nm">'+esc(t)+extra+'</span><span class="c">'+tagCount(t)+'</span><button class="more" aria-label="tag actions">⋯</button></div>';
 }
-function showTag(t){var set={};descendants(t).forEach(function(x){set[x]=1});
-  go('list',{title:'#'+tagPath(t),notes:byRecent(S.notes.filter(function(n){return n.tags.some(function(g){return set[g]})}))});}
+function tagNotes(t){var set={};descendants(t).forEach(function(x){set[x]=1});
+  return byRecent(S.notes.filter(function(n){return n.tags.some(function(g){return set[g]})}))}
+function showTag(t){go('list',{tag:t,title:'#'+tagPath(t),notes:tagNotes(t)})}
+/** Clickable path for a tag list: Tags › Parent › Child, plus the sub-tags to drill into. */
+function tagCrumbs(t){
+  var chain=[],x=t,g=0; while(x&&g++<12){chain.unshift(x);x=S.parent[x]}
+  var kids=(S.children[t]||[]);
+  return '<div class="crumbs"><button class="cr" data-crumb="">Tags</button>'+chain.map(function(c,i){
+      return '<span class="sep">›</span>'+(i<chain.length-1?'<button class="cr" data-crumb="'+esc(c)+'">'+esc(c)+'</button>':'<b>'+esc(c)+'</b>')}).join('')+
+    ' <span class="muted">('+tagNotes(t).length+')</span></div>'+
+    (kids.length?'<div class="subtags">'+kids.map(function(k){return '<button class="chip" data-crumb="'+esc(k)+'">'+esc(k)+' <span class="muted">'+tagCount(k)+'</span></button>'}).join('')+'</div>':'');
+}
 function tagMenu(t,anchor){
   closeMenu();
   var m=document.createElement('div');m.className='menu';m.id='menu';
