@@ -621,7 +621,7 @@ function linkDialog(){
     $('#lkBrowse').style.display=st.tab==='browse'?'':'none';$('#lkPaste').style.display=st.tab==='paste'?'':'none';info();if(st.tab==='paste')$('#lnkTxt').focus()}});
   function icon(it){return it.folder?'📁':/image\//.test(it.mime)?'🖼️':/pdf/.test(it.mime)?'📕':/spreadsheet|excel|csv/.test(it.mime)?'📊':/presentation|powerpoint/.test(it.mime)?'📽️':/document|word|text/.test(it.mime)?'📄':'📎'}
   function info(){var n=Object.keys(st.sel).length;
-    if(st.tab==='paste'){$('#lkInfo').textContent='';$('#lnkGo').textContent='Link';$('#lkFolder').style.display='none';return}
+    if(st.tab==='paste'){$('#lkInfo').textContent='';$('#lnkGo').textContent='Link';$('#lnkGo').disabled=false;$('#lkFolder').style.display='none';return}
     $('#lkInfo').textContent=n?n+' selected':'Tick files or folders, or open a folder';
     $('#lnkGo').textContent=n?'Link '+n:'Link';$('#lnkGo').disabled=!n;
     var inFolder=st.data&&!st.q&&st.where!=='root'&&st.where!=='shared';
