@@ -37,11 +37,11 @@ function api_batchUpdate(ids, ch) {
     if (ch.notebook && !(ch.notebook === 'Cabinet' && !tags.length)) r[col_('notebook')] = ch.notebook;   // Cabinet needs at least one tag
     if (ch.starred !== undefined && ch.starred !== null) {
       r[col_('starred')] = !!ch.starred;
-      try { DriveApp.getFileById(r[col_('docId')]).setStarred(!!ch.starred); } catch (e) {}
+      if (r[col_('source')] !== 'link') { try { DriveApp.getFileById(r[col_('docId')]).setStarred(!!ch.starred); } catch (e) {} }
     }
     r[col_('updated')] = now;
     t.sh.getRange(i + 2, 1, 1, NOTE_COLS.length).setValues([r]);
-    if (r[col_('tags')] + '|' + r[col_('notebook')] !== before) queue.push(r[col_('docId')]);
+    if (r[col_('tags')] + '|' + r[col_('notebook')] !== before && r[col_('source')] !== 'link') queue.push(r[col_('docId')]);
     out.push({ id: id, tags: tags, notebook: r[col_('notebook')], starred: r[col_('starred')] === true, updated: now.toISOString() });
   });
   queueHeaders_(queue);
@@ -53,14 +53,14 @@ function api_batchUpdate(ids, ch) {
 function api_batchTrash(ids) {
   var want = {}; ids.forEach(function (id) { want[id] = 1; });
   var t = notesTable_(), del = [];
-  t.rows.forEach(function (r, i) { if (want[r[col_('id')]]) del.push({ row: i + 2, docId: r[col_('docId')] }); });
+  t.rows.forEach(function (r, i) { if (want[r[col_('id')]]) del.push({ row: i + 2, docId: r[col_('docId')], link: r[col_('source')] === 'link' }); });
   // attachments used only by these notes go to trash too
   var attSh = ss_().getSheetByName('Attachments'), att = attSh.getDataRange().getValues(); att.shift();
   var refs = {}; att.forEach(function (a) { if (a[1]) refs[a[1]] = (refs[a[1]] || 0) + (want[a[0]] ? 0 : 1); });
-  att.forEach(function (a) { if (want[a[0]] && a[1] && !refs[a[1]]) { try { DriveApp.getFileById(a[1]).setTrashed(true); } catch (e) {} refs[a[1]] = 1; } });
+  att.forEach(function (a) { if (want[a[0]] && a[1] && !refs[a[1]] && a[5] !== 'link') { try { DriveApp.getFileById(a[1]).setTrashed(true); } catch (e) {} refs[a[1]] = 1; } });
   for (var k = att.length - 1; k >= 0; k--) if (want[att[k][0]]) attSh.deleteRow(k + 2);
   del.sort(function (a, b) { return b.row - a.row; }).forEach(function (d) {
-    try { DriveApp.getFileById(d.docId).setTrashed(true); } catch (e) {}
+    if (!d.link) { try { DriveApp.getFileById(d.docId).setTrashed(true); } catch (e) {} }   // linked file stays put
     t.sh.deleteRow(d.row);
   });
   return del.length;
@@ -135,7 +135,7 @@ function flushHeaders_(budgetMs) {
     var start = Date.now(), done = 0;
     while (q.length && Date.now() - start < budgetMs) {
       var d = q.shift(), r = byDoc[d];
-      if (r) {
+      if (r && r[col_('source')] !== 'link') {   // never write into a linked file
         try {
           var doc = DocumentApp.openById(d), body = doc.getBody(), first = body.getChild(0);
           var line = headerLine_(r[col_('notebook')], splitTags_(r[col_('tags')]));
@@ -202,6 +202,7 @@ function processDrop() {
       var d = di.next();
       try { var r = noteFromFolder_(d); if (r) made.push(r); } catch (e) { Logger.log('Drop failed for folder ' + d.getName() + ': ' + e); }
     }
+    try { made = made.concat(processLinks_(start)); } catch (e) { Logger.log('Links: ' + e); }
   } finally { lock.releaseLock(); }
   try { flushHeaders_(5000); } catch (e) {}
   return made;
@@ -313,6 +314,7 @@ function api_mergeNotes(ids, title) {
   t.rows.forEach(function (r, i) { byId[r[col_('id')]] = { r: r, row: i + 2 }; });
   ids = ids.filter(function (id) { return byId[id]; });
   if (ids.length < 2) throw new Error('Notes not found');
+  if (ids.some(function (id) { return byId[id].r[col_('source')] === 'link'; })) throw new Error('Linked notes can\'t be merged (that would change the original files).');
   var keep = byId[ids[0]], kr = keep.r;
   var doc = DocumentApp.openById(kr[col_('docId')]), body = doc.getBody();
   var tags = splitTags_(kr[col_('tags')]), starred = kr[col_('starred')] === true, att = +kr[col_('attachments')] || 0;
@@ -407,13 +409,20 @@ function pairingLink_(serverUrl, key) {
 /** Basic facts the app needs (no hard-coded IDs in the app, so other people can run their own server). */
 function api_appInfo() {
   var drop = null; try { drop = dropFolder_().getUrl(); } catch (e) {}
-  return { user: Session.getEffectiveUser().getEmail(), dropUrl: drop, version: 1 };
+  var link = null; try { link = linkFolder_().getUrl(); } catch (e) {}
+  return { user: Session.getEffectiveUser().getEmail(), dropUrl: drop, linkUrl: link, version: 2 };
 }
 
 /** Note body as clean HTML for the app's reading view (header line removed), plus attachments. */
 function api_noteView(id) {
   var n = readTable_('Notes').filter(function (x) { return x.id === id; })[0];
   if (!n) throw new Error('Note not found');
+  if (n.source === 'link') {
+    var meta = driveMeta_(n.docId);
+    if (!meta) return { html: '<p style="font:14px sans-serif">This linked file is missing or no longer shared with you.</p>', atts: [], docId: n.docId, link: { url: n.sourceUrl } };
+    if (meta.mimeType !== 'application/vnd.google-apps.document')
+      return { html: linkedPreviewHtml_(n.docId, meta), atts: [], docId: n.docId, link: { url: meta.webViewLink || n.sourceUrl, mime: meta.mimeType, name: meta.name } };
+  }
   var res = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + n.docId + '/export?mimeType=text/html',
     { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
   var html = res.getResponseCode() === 200 ? res.getContentText('UTF-8') : '<p>(Could not load this note: ' + res.getResponseCode() + ')</p>';
@@ -437,3 +446,196 @@ function api_thumbs(ids) {
   return out;
 }
 
+
+/* ---------------- Linked notes ----------------
+ * A linked note points at a file that stays where it is in Drive (Notes row: source = 'link', docId = that file).
+ * ArNote never renames, edits, stars or trashes a linked file. Removing the note only removes the link.
+ * Ways in: a shortcut put in ArNote/Link (checked with the Drop folder every 15 minutes), pasted links
+ * (api_linkFiles), or a linked folder: every file in it (and its sub-folders) gets a note in the Cabinet,
+ * tagged with its folder's name, and new files are picked up on each check.
+ */
+function linkFolder_() {
+  var p = props_(), root = DriveApp.getFolderById(p.getProperty('rootId'));
+  var f = getOrCreateFolder_(p.getProperty('linkId'), 'Link', root);
+  p.setProperty('linkId', f.getId());
+  return f;
+}
+
+function linkedIndex_() {
+  var m = {}; readTable_('Notes').forEach(function (n) { if (n.source === 'link') m[n.docId] = n.id; });
+  return m;
+}
+
+function linkTitle_(f) {
+  var name = f.getName();
+  return /^application\/vnd\.google-apps\./.test(f.getMimeType()) ? name : (name.replace(/\.[A-Za-z0-9]{1,5}$/, '') || name);
+}
+
+function createLinkedNote_(f, notebook, tags, index) {
+  if (index[f.getId()]) return null;
+  var now = new Date(), id = Utilities.getUuid();
+  var n = { id: id, title: linkTitle_(f), notebook: notebook || 'Inbox', tags: (tags || []).join(TAG_SEP), created: now, updated: now,
+    docId: f.getId(), starred: false, source: 'link', sourceUrl: f.getUrl(), author: '', attachments: 0 };
+  ss_().getSheetByName('Notes').appendRow(noteToRow_(n));
+  index[f.getId()] = id;
+  return { id: id, title: n.title, notebook: n.notebook, tags: tags || [], created: now.toISOString(), updated: now.toISOString(),
+    docId: n.docId, starred: false, att: 0, sourceUrl: n.sourceUrl, link: true };
+}
+
+function ensureTagParent_(name, parent) {
+  var exists = readTable_('Tags').some(function (t) { return String(t.name) === name; });
+  if (!exists) ss_().getSheetByName('Tags').appendRow([name, parent || '']);
+}
+
+function watchList_() { try { return JSON.parse(props_().getProperty('watchFolders') || '[]'); } catch (e) { return []; } }
+
+/** Link every file in a folder (and sub-folders) into the Cabinet, tagged with the folder name. */
+function syncFolder_(folder, index, start, parentTag) {
+  var tag = folder.getName(), out = [];
+  ensureTagParent_(tag, parentTag || '');
+  var it = folder.getFiles();
+  while (it.hasNext() && Date.now() - start < 240000) {
+    var f = it.next();
+    if (f.getMimeType() === MimeType.SHORTCUT) continue;
+    var n = createLinkedNote_(f, 'Cabinet', [tag], index); if (n) out.push(n);
+  }
+  var sub = folder.getFolders();
+  while (sub.hasNext() && Date.now() - start < 240000) out = out.concat(syncFolder_(sub.next(), index, start, tag));
+  return out;
+}
+
+function watchFolder_(folder, index, start) {
+  var w = watchList_();
+  if (w.indexOf(folder.getId()) < 0) { w.push(folder.getId()); props_().setProperty('watchFolders', JSON.stringify(w)); }
+  return syncFolder_(folder, index, start, '');
+}
+
+/** Called from processDrop (every 15 minutes): shortcuts in ArNote/Link, plus new files in linked folders. */
+function processLinks_(start) {
+  var index = linkedIndex_(), made = [];
+  var it = linkFolder_().getFiles();
+  while (it.hasNext() && Date.now() - start < 240000) {
+    var s = it.next();
+    try {
+      if (s.getMimeType() === MimeType.SHORTCUT) {
+        var tid = s.getTargetId(), target = null, isFolder = false;
+        try { target = DriveApp.getFileById(tid); } catch (e) { try { target = DriveApp.getFolderById(tid); isFolder = true; } catch (e2) {} }
+        if (target) {
+          if (isFolder) made = made.concat(watchFolder_(target, index, start));
+          else { var n = createLinkedNote_(target, 'Inbox', [], index); if (n) made.push(n); }
+        }
+        s.setTrashed(true);   // only the shortcut; the original is untouched
+      } else {
+        made.push(noteFromFile_(s));   // a real file put here is imported like the Drop folder
+      }
+    } catch (e) { Logger.log('Link failed for ' + s.getName() + ': ' + e); }
+  }
+  watchList_().forEach(function (fid) {
+    if (Date.now() - start > 240000) return;
+    try { made = made.concat(syncFolder_(DriveApp.getFolderById(fid), index, start, '')); } catch (e) {}
+  });
+  return made;
+}
+
+/** Paste-a-link: Drive file or folder links (one or many). */
+function api_linkFiles(text) {
+  var ids = String(text || '').match(/[-\w]{25,}/g) || [], seen = {}, index = linkedIndex_(), start = Date.now();
+  var out = { notes: [], folders: [], failed: 0, already: 0 };
+  ids.forEach(function (id) {
+    if (seen[id]) return; seen[id] = 1;
+    var f = null, folder = null;
+    try { f = DriveApp.getFileById(id); } catch (e) { try { folder = DriveApp.getFolderById(id); } catch (e2) {} }
+    if (f) { var n = createLinkedNote_(f, 'Inbox', [], index); if (n) out.notes.push(n); else out.already++; }
+    else if (folder) { var made = watchFolder_(folder, index, start); out.folders.push({ name: folder.getName(), count: made.length }); out.notes = out.notes.concat(made); }
+    else out.failed++;
+  });
+  return out;
+}
+
+function api_linkedFolders() {
+  return watchList_().map(function (id) { try { var f = DriveApp.getFolderById(id); return { id: id, name: f.getName(), url: f.getUrl() }; } catch (e) { return { id: id, name: '(missing folder)', url: '' }; } });
+}
+
+function api_unwatchFolder(id) {
+  props_().setProperty('watchFolders', JSON.stringify(watchList_().filter(function (x) { return x !== id; })));
+  return true;
+}
+
+function driveMeta_(id) {
+  var r = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + id + '?fields=mimeType,name,thumbnailLink,size,webViewLink',
+    { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+  return r.getResponseCode() === 200 ? JSON.parse(r.getContentText()) : null;
+}
+
+/** Reading-view HTML for a linked file that isn't a Google Doc: the picture itself, or a large page-1 preview. */
+function linkedPreviewHtml_(id, meta) {
+  var src = '';
+  try {
+    if (/^image\//.test(meta.mimeType) && +meta.size < 5 * 1024 * 1024) {
+      var b = DriveApp.getFileById(id).getBlob();
+      src = 'data:' + meta.mimeType + ';base64,' + Utilities.base64Encode(b.getBytes());
+    } else if (meta.thumbnailLink) {
+      var r = UrlFetchApp.fetch(meta.thumbnailLink.replace(/=s\d+$/, '=s1600'), { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+      if (r.getResponseCode() === 200) src = 'data:' + (r.getHeaders()['Content-Type'] || 'image/png') + ';base64,' + Utilities.base64Encode(r.getContent());
+    }
+  } catch (e) {}
+  var name = String(meta.name || '').replace(/[<>&"]/g, '');
+  return '<html><body style="font:14px sans-serif;color:#444;text-align:center">' +
+    (src ? '<img src="' + src + '" style="max-width:100%;box-shadow:0 1px 6px rgba(0,0,0,.25)">' +
+      (/^image\//.test(meta.mimeType) ? '' : '<p style="color:#888">Preview of the first page · open the file to see all of it</p>')
+      : '<p style="margin-top:40px">No preview for this kind of file.<br>Use “Open in Drive” to see it.</p>') +
+    '<p style="color:#888;font-size:12px">' + name + '</p></body></html>';
+}
+
+/* ---------------- Print ----------------
+ * Google Docs (notes and linked Docs) are combined into one PDF; other files come back as their own PDF/file.
+ */
+function exportPdf_(id) {
+  var r = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + id + '/export?mimeType=application/pdf',
+    { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+  if (r.getResponseCode() !== 200) throw new Error('PDF export failed (' + r.getResponseCode() + ')');
+  return r.getContent();
+}
+
+function api_printPdf(ids) {
+  var byId = {}; readTable_('Notes').forEach(function (n) { byId[n.id] = n; });
+  var docs = [], others = [], out = { files: [] }, T = DocumentApp.ElementType;
+  (ids || []).forEach(function (id) {
+    var n = byId[id]; if (!n) return;
+    var mt = ''; try { mt = DriveApp.getFileById(n.docId).getMimeType(); } catch (e) { return; }
+    (mt === MimeType.GOOGLE_DOCS ? docs : others).push({ n: n, mt: mt });
+  });
+  if (docs.length) {
+    var tmp = DocumentApp.create('ArNote print'), body = tmp.getBody();
+    docs.forEach(function (d, i) {
+      if (i) body.appendPageBreak();
+      body.appendParagraph(String(d.n.title)).setHeading(DocumentApp.ParagraphHeading.HEADING1);
+      var src = DocumentApp.openById(d.n.docId).getBody();
+      for (var k = 0; k < src.getNumChildren(); k++) {
+        var el = src.getChild(k), ty = el.getType();
+        if (k === 0 && ty === T.PARAGRAPH && /^Notebook:/.test(el.asParagraph().getText())) continue;
+        try {
+          if (ty === T.PARAGRAPH) body.appendParagraph(el.copy().asParagraph());
+          else if (ty === T.LIST_ITEM) body.appendListItem(el.copy().asListItem());
+          else if (ty === T.TABLE) body.appendTable(el.copy().asTable());
+          else if (ty === T.PAGE_BREAK) body.appendPageBreak();
+        } catch (e) {}
+      }
+    });
+    try { var p0 = body.getChild(0); if (p0.getType() === T.PARAGRAPH && !p0.asParagraph().getText() && body.getNumChildren() > 1) body.removeChild(p0); } catch (e) {}
+    tmp.saveAndClose();
+    try {
+      var pdf = exportPdf_(tmp.getId());
+      out.files.push({ name: docs.length > 1 ? 'ArNote - ' + docs.length + ' notes.pdf' : String(docs[0].n.title) + '.pdf', mime: 'application/pdf', count: docs.length, b64: Utilities.base64Encode(pdf) });
+    } finally { DriveApp.getFileById(tmp.getId()).setTrashed(true); }
+  }
+  others.forEach(function (o) {
+    var f = DriveApp.getFileById(o.n.docId), name = String(o.n.title), b, mt = o.mt;
+    try {
+      if (/^application\/vnd\.google-apps\./.test(mt)) { b = exportPdf_(o.n.docId); mt = 'application/pdf'; name += '.pdf'; }
+      else { if (f.getSize() > 20 * 1024 * 1024) { out.files.push({ name: f.getName(), tooBig: true, url: f.getUrl() }); return; } b = f.getBlob().getBytes(); mt = f.getMimeType(); name = f.getName(); }
+      out.files.push({ name: name, mime: mt, count: 1, b64: Utilities.base64Encode(b) });
+    } catch (e) { out.files.push({ name: name, error: String(e.message || e), url: f.getUrl() }); }
+  });
+  return out;
+}

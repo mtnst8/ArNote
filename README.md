@@ -33,6 +33,20 @@ Each person runs their own small, free "server" in their own Google account, so 
 
 `server/Code.gs` includes an Evernote importer (Sheet menu **ArNote → Start / resume Evernote import**). It expects an `ArNote-import` folder in Drive with `notes.jsonl` and an `attachments/` folder, produced from your `.enex` export.
 
+## Linked Drive files
+
+Keep files where they are in Drive and still have them in ArNote:
+
+- **Inbox → 🔗 Link Drive files**, then paste links to files or folders.
+- Or in Drive (or the Drive phone app): **Organize → Add shortcut → ArNote › Link**. They show up within 15 minutes.
+- A linked **folder** puts every file in it (and its sub-folders) in the Cabinet, tagged with the folder's name. New files are added on each check; stop it in **Settings → Linked Drive folders**.
+
+ArNote never renames, edits, stars or deletes a linked file. "Remove link" only removes the note.
+
+## Printing
+
+Select notes and choose **🖨 Print** (or Print on a single note). Google Docs are combined into one PDF; other files come as their own PDFs.
+
 ## How it's built
 
 - `index.html`: the whole app (HTML/CSS/JS, no build step). It talks to your server with `fetch` (`{k: key, fn, a: args}`).

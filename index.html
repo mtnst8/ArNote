@@ -228,6 +228,7 @@ body.unpaired #side{display:none}body.unpaired main{margin-left:auto!important}
   <button class="btn small" id="aStar">★ Bookmark</button>
   <button class="btn small" id="aUnstar">☆ Remove bookmark</button>
   <button class="btn small" id="aMerge">⇲ Merge</button>
+  <button class="btn small" id="aPrint">🖨 Print</button>
   <button class="btn small danger" id="aDel">Delete</button>
   <button class="btn small" id="aDone">Clear</button>
 </div></div>
@@ -308,7 +309,7 @@ function rowHtml(n){
   var on=!!S.sel[n.id];
   return '<div class="row'+(on?' sel':'')+'" data-id="'+n.id+'">'+
     '<span class="cbw" title="Select"><input type="checkbox" class="cb"'+(on?' checked':'')+' aria-label="Select note"></span>'+
-    '<div class="t">'+(n.starred?'<span class="s">★</span> ':'')+esc(n.title)+'</div>'+
+    '<div class="t">'+(n.starred?'<span class="s">★</span> ':'')+(n.link?'<span title="Linked Drive file">🔗</span> ':'')+esc(n.title)+'</div>'+
     '<div class="tg">'+n.tags.slice(0,3).map(function(t){return '<span class="chip">'+esc(t)+'</span>'}).join('')+(n.tags.length>3?'<span class="muted" style="font-size:12px"> +'+(n.tags.length-3)+'</span>':'')+'</div>'+
     '<div class="m"><span class="nb">'+esc(n.notebook)+' · </span>'+fmt(n.updated||n.created)+(n.att?' · 📎'+n.att:'')+'</div></div>';
 }
@@ -338,7 +339,7 @@ function paintSel(){
   $$('.row[data-id]').forEach(function(r){var on=!!S.sel[r.dataset.id];r.classList.toggle('sel',on);var c=r.querySelector('.cb');if(c)c.checked=on});
   $('#actbar').classList.toggle('on',n>0); document.body.classList.toggle('selmode',n>0);
   $('#selN').textContent=n+' selected';
-  ['aTags','aFile','aInbox','aStar','aUnstar','aDel'].forEach(function(k){$('#'+k).disabled=!n});
+  ['aTags','aFile','aInbox','aStar','aUnstar','aDel','aPrint'].forEach(function(k){$('#'+k).disabled=!n});
   $('#aMerge').disabled=n<2; $('#aMerge').title=n<2?'Select two or more notes to merge':'Combine the selected notes into one';
   $('#aAll').textContent=(n&&n===S.listIds.length)?'Select none':'Select all ('+S.listIds.length+')';
   setTimeout(function(){var c=$$('.row .cb');c.forEach(function(x){x.checked=!!S.sel[x.closest('.row').dataset.id]})},0);
@@ -365,6 +366,7 @@ $('#aDel').onclick=function(){
   toast('Deleting '+ids.length+'…'); S.sel={}; refreshInboxCount(); rerender(); paintSel();
   call('api_batchTrash',ids).then(function(n){toast(n+' moved to Drive trash (restorable for 30 days)')});
 };
+$('#aPrint').onclick=function(){printNotes(Object.keys(S.sel))};
 $('#aMerge').onclick=function(){
   var ids=Object.keys(S.sel).filter(function(id){return S.byId[id]});
   if(ids.length<2){toast('Select two or more notes to merge');return}
@@ -434,7 +436,7 @@ function loadThumbs(arr){
 }
 function cardHtml(n){
   return '<div class="ncard" data-open="'+n.id+'"><div class="nbk">'+esc(n.notebook)+(n.starred?' · <span class="s" style="color:var(--star)">★</span>':'')+'</div>'+
-    '<div class="tt">'+esc(n.title)+'</div>'+
+    '<div class="tt">'+(n.link?'🔗 ':'')+esc(n.title)+'</div>'+
     '<div class="tgs">'+n.tags.slice(0,2).map(function(t){return '<span class="chip">'+esc(t)+'</span>'}).join('')+(n.tags.length>2?'<span class="muted" style="font-size:12px"> +'+(n.tags.length-2)+'</span>':'')+'</div>'+
     '<div class="th">'+(thumbUrl(n)?'<img alt="" src="'+thumbUrl(n)+'">':'<div class="ph">'+esc((n.title||'?')[0])+'</div>')+'</div>'+
     '<div class="dt">'+fmt(n.updated||n.created)+(n.att?' · 📎'+n.att:'')+'</div></div>';
@@ -546,7 +548,7 @@ function renderPv(){
   $('#pvDel').onclick=function(){var b=this;
     if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Tap again to delete';setTimeout(function(){if(b.isConnected){b.textContent='Delete';delete b.dataset.arm}},3000);return}
     var id=n.id; delete S.byId[id]; S.notes=S.notes.filter(function(x){return x.id!==id}); refreshInboxCount(); refreshSplit();
-    call('api_batchTrash',[id]).then(function(){toast('Moved to Drive trash (restorable for 30 days)')});};
+    var wasLink=n.link; call('api_batchTrash',[id]).then(function(){toast(wasLink?'Link removed (the file is untouched)':'Moved to Drive trash (restorable for 30 days)')});};
 }
 function pvMove(d){var o=S.pvOrder||[],i=o.indexOf(S.pv);if(i<0)return;var j=Math.max(0,Math.min(o.length-1,i+d));if(j===i)return;S.pv=o[j];markAct();renderPv();
   var r=$('#lcol .row.act');if(r)r.scrollIntoView({block:'nearest'})}
@@ -577,9 +579,50 @@ document.addEventListener('keydown',function(e){
 /* ---------- Add files: button, drag & drop anywhere, Drive Drop folder ---------- */
 var DROP_URL='';
 var UP_MAX=35*1024*1024;
-function upBar(){return '<div class="bar upbar"><button class="btn" id="upBtn">＋ Add files</button><input type="file" id="upIn" multiple hidden>'+
+var LINK_URL='';
+function linkUrl(n){var u=n.sourceUrl||('https://drive.google.com/file/d/'+n.docId+'/view');return u+(S.user?(u.indexOf('?')<0?'?':'&')+'authuser='+encodeURIComponent(S.user):'')}
+function upBar(){return '<div class="bar upbar"><button class="btn" id="upBtn">＋ Add files</button><button class="btn" id="lnkBtn">🔗 Link Drive files</button><input type="file" id="upIn" multiple hidden>'+
   '<span class="muted">or drag files here'+(DROP_URL?' · bigger files: <a href="'+DROP_URL+'" target="_blank">Drive Drop folder</a>':'')+'</span></div>'}
-function bindUp(){var b=$('#upBtn'),i=$('#upIn');if(!b)return;b.onclick=function(){i.click()};i.onchange=function(){uploadFiles([].slice.call(i.files));i.value=''}}
+function bindUp(){var b=$('#upBtn'),i=$('#upIn');if(!b)return;b.onclick=function(){i.click()};if($('#lnkBtn'))$('#lnkBtn').onclick=linkDialog;i.onchange=function(){uploadFiles([].slice.call(i.files));i.value=''}}
+/* ---------- linked Drive files ---------- */
+function linkDialog(){
+  modal('Link Drive files','Files stay exactly where they are in your Drive. ArNote adds a note that points to each one.',
+    '<label class="muted" style="font-size:13px">Paste Drive links (one or more). A folder link links every file in it, into the Cabinet, tagged with the folder name, and keeps it in sync.</label>'+
+    '<textarea id="lnkTxt" rows="5" placeholder="https://docs.google.com/document/d/…&#10;https://drive.google.com/file/d/…&#10;https://drive.google.com/drive/folders/…" style="margin-top:6px"></textarea>'+
+    '<p class="muted" style="font-size:13px;margin:10px 0 0"><b>From Drive or the Drive phone app:</b> pick files or a folder → <i>Organize → Add shortcut</i> → <b>ArNote › Link</b>'+(LINK_URL?' (<a href="'+LINK_URL+'" target="_blank" style="color:var(--acc)">open the Link folder</a>)':'')+'. They show up in your Inbox within 15 minutes.</p>',
+    '<span class="grow"></span><button class="btn" id="lnkC">Cancel</button><button class="btn primary" id="lnkGo">Link</button>');
+  setTimeout(function(){$('#lnkTxt').focus()},30);
+  $('#lnkC').onclick=closeModal;
+  $('#lnkGo').onclick=function(){var b=this,t=$('#lnkTxt').value.trim();if(!t)return;b.disabled=true;b.textContent='Linking…';
+    call('api_linkFiles',t).then(function(r){closeModal();
+      (r.notes||[]).forEach(function(n){if(!S.byId[n.id]){S.notes.push(n);S.byId[n.id]=n}});
+      if((r.folders||[]).length) return load().then(function(){return r});
+      return r;
+    }).then(function(r){refreshInboxCount();
+      var msg=[]; if(r.notes.length) msg.push('Linked '+r.notes.length+' file'+(r.notes.length>1?'s':''));
+      (r.folders||[]).forEach(function(f){msg.push('folder “'+f.name+'” → Cabinet')});
+      if(r.already) msg.push(r.already+' already linked'); if(r.failed) msg.push(r.failed+' link'+(r.failed>1?'s':'')+' not found');
+      toast(msg.join(' · ')||'Nothing to link'); rerender();
+    }).catch(function(){b.disabled=false;b.textContent='Link'});
+  };
+}
+/* ---------- print ---------- */
+function printNotes(ids){
+  ids=ids.filter(function(id){return S.byId[id]}); if(!ids.length) return;
+  modal('Print '+ids.length+' note'+(ids.length>1?'s':''),'Getting PDFs ready…','<div id="prl"><p class="muted">This can take a few seconds per note.</p></div>','<span class="grow"></span><button class="btn" id="prC">Close</button>');
+  $('#prC').onclick=closeModal;
+  call('api_printPdf',ids).then(function(r){
+    var el=$('#prl'); if(!el) return;
+    el.innerHTML=(r.files||[]).map(function(f,i){
+      var label=esc(f.name)+(f.count>1?' <span class="muted">('+f.count+' notes in one file)</span>':'');
+      if(f.b64) return '<div class="setrow"><button class="btn primary" data-pf="'+i+'">Open</button><span>'+label+'</span></div>';
+      return '<div class="setrow"><a class="btn" target="_blank" href="'+esc(f.url||'#')+'">Open in Drive</a><span>'+label+' <span class="muted">'+(f.tooBig?'(too big to open here)':esc(f.error||''))+'</span></span></div>';
+    }).join('')+'<p class="muted" style="font-size:12px;margin-top:8px">Each file opens in a new tab; print from there (Ctrl+P, or Share → Print on a phone).</p>';
+    $$('#prl [data-pf]').forEach(function(b){b.onclick=function(){var f=r.files[+b.dataset.pf];
+      var bin=atob(f.b64),u8=new Uint8Array(bin.length);for(var k=0;k<bin.length;k++)u8[k]=bin.charCodeAt(k);
+      var url=URL.createObjectURL(new Blob([u8],{type:f.mime||'application/pdf'}));window.open(url,'_blank');}});
+  }).catch(function(){var el=$('#prl');if(el)el.innerHTML='<p class="muted">Could not prepare the PDFs.</p>'});
+}
 function readB64(f){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){res(String(r.result).split(',')[1]||'')};r.onerror=rej;r.readAsDataURL(f)})}
 function uploadFiles(files){
   if(!files.length) return;
@@ -836,18 +879,20 @@ function viewNote(id,keep){
     '<div class="bar">'+
       (n.notebook==='Inbox'?'<button class="btn primary" id="file">File → Cabinet</button>':'<button class="btn" id="unfile">Move to Inbox</button>')+
       (isTriage?'<button class="btn" id="skip">Skip</button>':'')+
-      '<a class="btn" target="_blank" id="odocs" href="'+docUrl(n.docId,true)+'">Edit in Google Docs ↗</a>'+
-      '<button class="btn" id="ehere">Edit here</button>'+
-      (n.sourceUrl?'<a class="btn" target="_blank" href="'+esc(n.sourceUrl)+'">Source</a>':'')+
-      '<button class="btn danger" id="del">Delete</button></div>'+
+      (n.link?'<a class="btn" target="_blank" id="odocs" href="'+linkUrl(n)+'">Open in Drive ↗</a>':
+        '<a class="btn" target="_blank" id="odocs" href="'+docUrl(n.docId,true)+'">Edit in Google Docs ↗</a><button class="btn" id="ehere">Edit here</button>'+
+        (n.sourceUrl?'<a class="btn" target="_blank" href="'+esc(n.sourceUrl)+'">Source</a>':''))+
+      '<button class="btn" id="nprint">🖨 Print</button>'+
+      '<button class="btn danger" id="del">'+(n.link?'Remove link':'Delete')+'</button></div>'+
     '<div class="atts" id="atts"></div>'+
-    '<div class="muted" id="ehint" style="font-size:12px;margin:2px 0 6px">Reading view. To change the text, use Edit in Google Docs (on a phone it opens the Docs app).</div>'+
+    '<div class="muted" id="ehint" style="font-size:12px;margin:2px 0 6px">'+(n.link?'🔗 Linked file: it stays where it is in your Drive. Edits happen in the original; removing this note never deletes the file.':'Reading view. To change the text, use Edit in Google Docs (on a phone it opens the Docs app).')+'</div>'+
     '<div id="nbody">'+readerHtml()+'</div>';
   renderTags(n);
   var fr=fillReader($('#nbody .reader'),id,true);
   if(fr) fr.then(function(d){if(d&&d.atts&&d.atts.length&&$('#atts'))$('#atts').innerHTML=d.atts.map(function(a){return '<a target="_blank" href="'+fileUrl(a.fileId)+'">📎 '+esc(a.filename)+'</a>'}).join('')}).catch(function(){});
   $('#odocs').onclick=function(){S.editing=id};
-  $('#ehere').onclick=function(){ $('#ehint').textContent='Editing in Google Docs. Changes save automatically. If this says you need access, use Edit in Google Docs instead (this browser is signed in to a different Google account).';
+  $('#nprint').onclick=function(){printNotes([id])};
+  if($('#ehere')) $('#ehere').onclick=function(){ $('#ehint').textContent='Editing in Google Docs. Changes save automatically. If this says you need access, use Edit in Google Docs instead (this browser is signed in to a different Google account).';
     $('#nbody').innerHTML='<iframe src="https://docs.google.com/document/d/'+n.docId+'/edit?rm=minimal'+(S.user?'&authuser='+encodeURIComponent(S.user):'')+'" allow="clipboard-read; clipboard-write"></iframe>'; this.remove(); S.editing=id; };
   $('#star').onclick=function(){batch({starred:!n.starred},'',[id]);viewNote(id)};
   $('#title').onchange=function(){n.title=this.value;call('api_updateNote',n.id,{title:n.title})};
@@ -858,7 +903,7 @@ function viewNote(id,keep){
   if($('#skip')) $('#skip').onclick=function(){S.triage.push(S.triage.shift());next(true)};
   $('#del').onclick=function(){var b=this;if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Tap again to delete';setTimeout(function(){b.textContent='Delete';delete b.dataset.arm},3000);return}
     delete S.byId[id];S.notes=S.notes.filter(function(x){return x.id!==id});refreshInboxCount();
-    call('api_batchTrash',[id]).then(function(){toast('Moved to Drive trash')}); next()};
+    var wasLink=n.link; call('api_batchTrash',[id]).then(function(){toast(wasLink?'Link removed (the file is untouched)':'Moved to Drive trash')}); next()};
 
   function next(skipped){ if(isTriage){ if(!skipped&&S.triage[0]===id) S.triage.shift(); } refreshInboxCount();
     if(isTriage&&S.triage.length){S.view='note';viewNote(S.triage[0])} else go(isTriage?'inbox':'home'); }
@@ -925,11 +970,16 @@ function viewSettings(){
     '<h3 style="margin:16px 0 4px;font-size:15px">Add another device</h3>'+
     '<p class="muted" style="margin:0 0 8px;font-size:13px">Open this pairing link on your phone or another computer (email it to yourself). Anyone with this link can open your notes — keep it private.</p>'+
     '<div class="setrow"><button class="btn primary" id="cpPair">Copy pairing link</button>'+(navigator.share?'<button class="btn" id="shPair">Share…</button>':'')+'</div>'+
+    '<h3 style="margin:16px 0 4px;font-size:15px">Linked Drive folders</h3><div id="lfold" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">This device</h3>'+
     '<div class="setrow"><button class="btn" id="reload">Reload notes</button><button class="btn danger" id="unpair">Unpair this device</button></div>'+
     '<p class="muted" style="font-size:12px;margin-top:14px">ArNote · your notes stay in your own Google Drive.</p></div>';
   $('#cpPair').onclick=function(){var l=pairLink();(navigator.clipboard?navigator.clipboard.writeText(l):Promise.reject()).then(function(){toast('Pairing link copied')}).catch(function(){prompt('Copy this link:',l)})};
   if($('#shPair')) $('#shPair').onclick=function(){navigator.share({title:'ArNote pairing link',text:pairLink()}).catch(function(){})};
+  call('api_linkedFolders').then(function(fs){var el=$('#lfold');if(!el)return;
+    el.innerHTML=fs.length?fs.map(function(f){return '<div class="setrow"><span>📁 '+esc(f.name)+'</span><button class="btn small" data-uw="'+esc(f.id)+'">Stop syncing</button></div>'}).join('')+
+      '<p style="margin:4px 0 0">New files in these folders are added to the Cabinet every 15 minutes. Stopping keeps the notes already made.</p>':'None yet. Link a folder from Inbox → 🔗 Link Drive files.';
+    $$('#lfold [data-uw]').forEach(function(b){b.onclick=function(){call('api_unwatchFolder',b.dataset.uw).then(function(){toast('Folder no longer syncs');viewSettings()})}});}).catch(function(){});
   $('#reload').onclick=function(){load().then(function(){toast('Notes reloaded');go('home')})};
   $('#unpair').onclick=function(){var b=this;if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Tap again to unpair';return}saveCfg(null);location.hash='';location.reload()};
 }
@@ -961,7 +1011,7 @@ function tryPair(c){
 function start(){
   document.body.classList.remove('unpaired');
   $('#main').innerHTML='<div class="loading">Loading notes…</div>';
-  Promise.all([load(),call('api_appInfo').then(function(i){DROP_URL=i.dropUrl||'';if(i.user)S.user=i.user}).catch(function(){})]).then(function(){
+  Promise.all([load(),call('api_appInfo').then(function(i){DROP_URL=i.dropUrl||'';LINK_URL=i.linkUrl||'';if(i.user)S.user=i.user}).catch(function(){})]).then(function(){
     if(location.search.indexOf('share=1')>=0) receiveShare(); else go('home');
   });
 }

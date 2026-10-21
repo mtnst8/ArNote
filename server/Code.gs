@@ -382,7 +382,7 @@ function api_bootstrap() {
   var notes = readTable_('Notes').map(function (n) {
     return { id: n.id, title: String(n.title), notebook: n.notebook, tags: n.tags ? String(n.tags).split(TAG_SEP) : [],
       created: iso_(n.created), updated: iso_(n.updated), docId: n.docId, starred: n.starred === true || n.starred === 'TRUE',
-      att: +n.attachments || 0, sourceUrl: n.sourceUrl || '' };
+      att: +n.attachments || 0, sourceUrl: n.sourceUrl || '', link: n.source === 'link' };
   });
   var tags = readTable_('Tags').map(function (t) { return { name: String(t.name), parent: String(t.parent || '') }; });
   var order = (props_().getProperty('bookmarkOrder') || '').split(',').filter(String);
@@ -411,6 +411,12 @@ function api_search(q) {
     if (byDoc[fid]) ids[byDoc[fid]] = 1;
     (byFile[fid] || []).forEach(function (nid) { ids[nid] = 1; });
   }
+  // linked notes point at files elsewhere in Drive: search the whole Drive for those
+  var linked = {}; readTable_('Notes').forEach(function (n) { if (n.source === 'link') linked[n.docId] = n.id; });
+  if (Object.keys(linked).length) {
+    var it2 = DriveApp.searchFiles("fullText contains '" + safe + "' and trashed = false"), k2 = 0;
+    while (it2.hasNext() && k2++ < 300) { var f2 = it2.next(); if (linked[f2.getId()]) ids[linked[f2.getId()]] = 1; }
+  }
   return Object.keys(ids);
 }
 
@@ -419,16 +425,16 @@ function api_updateNote(id, ch) {
   var row = findNoteRow_(id), sh = ss_().getSheetByName('Notes');
   var vals = sh.getRange(row, 1, 1, NOTE_COLS.length).getValues()[0];
   var n = {}; NOTE_COLS.forEach(function (c, i) { n[c] = vals[i]; });
-  var file = DriveApp.getFileById(n.docId);
-  if (ch.title !== undefined) { n.title = String(ch.title).trim() || 'Untitled Note'; file.setName(n.title); }
+  var file = DriveApp.getFileById(n.docId), linked = n.source === 'link';   // linked files are never renamed, starred or edited
+  if (ch.title !== undefined) { n.title = String(ch.title).trim() || 'Untitled Note'; if (!linked) file.setName(n.title); }
   if (ch.notebook !== undefined) n.notebook = ch.notebook;
   if (ch.tags !== undefined) {
     var known = {}; readTable_('Tags').forEach(function (t) { known[t.name] = 1; });
     ch.tags.forEach(function (t) { if (!known[t]) ss_().getSheetByName('Tags').appendRow([t, '']); });
     n.tags = ch.tags.join(TAG_SEP);
   }
-  if (ch.starred !== undefined) { n.starred = !!ch.starred; file.setStarred(n.starred); }
-  if (ch.notebook !== undefined || ch.tags !== undefined) {
+  if (ch.starred !== undefined) { n.starred = !!ch.starred; if (!linked) file.setStarred(n.starred); }
+  if (!linked && (ch.notebook !== undefined || ch.tags !== undefined)) {
     try {
       var doc = DocumentApp.openById(n.docId), first = doc.getBody().getChild(0);
       var line = headerLine_(n.notebook, n.tags ? String(n.tags).split(TAG_SEP) : []);
