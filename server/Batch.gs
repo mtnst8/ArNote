@@ -639,3 +639,48 @@ function api_printPdf(ids) {
   });
   return out;
 }
+
+/* ---- Drive browser for the "Link Drive files" dialog ----
+ * where: 'root' (My Drive), 'shared' (Shared with me) or a folder id; q: search by name instead.
+ */
+function driveApi_(path) {
+  var r = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/' + path, { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+  if (r.getResponseCode() !== 200) throw new Error('Drive error ' + r.getResponseCode());
+  return JSON.parse(r.getContentText());
+}
+
+function api_driveList(where, q) {
+  where = where || 'root';
+  var FOLDER = 'application/vnd.google-apps.folder', p = props_();
+  var arnoteRoot = p.getProperty('rootId');
+  var myRoot = p.getProperty('myDriveRoot');
+  if (!myRoot) { myRoot = driveApi_('files/root?fields=id').id; p.setProperty('myDriveRoot', myRoot); }
+  var query;
+  if (q) query = "name contains '" + String(q).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "' and trashed = false";
+  else if (where === 'shared') query = 'sharedWithMe and trashed = false';
+  else query = "'" + (where === 'root' ? myRoot : where) + "' in parents and trashed = false";
+  var res = driveApi_('files?pageSize=300&orderBy=folder,name_natural&supportsAllDrives=true&includeItemsFromAllDrives=true' +
+    '&fields=files(id,name,mimeType,modifiedTime,shortcutDetails,owners(emailAddress))&q=' + encodeURIComponent(query));
+  var linked = {}; readTable_('Notes').forEach(function (n) { if (n.source === 'link') linked[n.docId] = 1; });
+  var synced = {}; watchList_().forEach(function (id) { synced[id] = 1; });
+  var items = (res.files || []).map(function (f) {
+    var id = f.id, mt = f.mimeType;
+    if (mt === 'application/vnd.google-apps.shortcut' && f.shortcutDetails) { id = f.shortcutDetails.targetId; mt = f.shortcutDetails.targetMimeType; }
+    return { id: id, name: f.name, folder: mt === FOLDER, mime: mt, modified: f.modifiedTime, owner: f.owners && f.owners[0] && f.owners[0].emailAddress,
+      linked: !!linked[id], synced: !!synced[id] };
+  }).filter(function (x) { return x.id !== arnoteRoot; });   // don't offer ArNote's own folder
+  items.sort(function (a, b) { return (b.folder - a.folder) || a.name.localeCompare(b.name, undefined, { numeric: true }); });
+  // breadcrumb for a folder: walk up to My Drive (or to the top of a shared folder)
+  var path = [];
+  if (!q && where !== 'root' && where !== 'shared') {
+    var id = where, guard = 0;
+    while (id && id !== myRoot && guard++ < 12) {
+      var f = null; try { f = driveApi_('files/' + id + '?supportsAllDrives=true&fields=id,name,parents'); } catch (e) {}
+      if (!f) break;   // parent not visible to this account (e.g. inside someone else's drive)
+      path.unshift({ id: f.id, name: f.name });
+      id = f.parents && f.parents[0];
+    }
+    if (id !== myRoot) path.unshift({ id: 'shared', name: 'Shared with me' });
+  }
+  return { where: where, q: q || '', path: path, items: items, synced: !!synced[where] };
+}

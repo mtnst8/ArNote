@@ -37,7 +37,7 @@ Each person runs their own small, free "server" in their own Google account, so 
 
 Keep files where they are in Drive and still have them in ArNote:
 
-- **Inbox → 🔗 Link Drive files**, then paste links to files or folders.
+- **Inbox → 🔗 Link Drive files**: browse My Drive or Shared with me (or search by name), tick files or folders, or paste links.
 - Or in Drive (or the Drive phone app): **Organize → Add shortcut → ArNote › Link**. They show up within 15 minutes.
 - A linked **folder** puts every file in it (and its sub-folders) in the Cabinet, tagged with the folder's name. New files are added on each check; stop it in **Settings → Linked Drive folders**.
 

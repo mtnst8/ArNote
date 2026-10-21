@@ -588,26 +588,61 @@ function upBar(){return '<div class="bar upbar"><button class="btn" id="upBtn">�
 function bindUp(){var b=$('#upBtn'),i=$('#upIn');if(!b)return;b.onclick=function(){i.click()};if($('#lnkBtn'))$('#lnkBtn').onclick=linkDialog;i.onchange=function(){uploadFiles([].slice.call(i.files));i.value=''}}
 /* ---------- linked Drive files ---------- */
 function linkDialog(){
+  var st={where:'root',q:'',sel:{},data:null,tab:'browse'};
   modal('Link Drive files','Files stay exactly where they are in your Drive. ArNote adds a note that points to each one.',
-    '<label class="muted" style="font-size:13px">Paste Drive links (one or more). A folder link links every file in it, into the Cabinet, tagged with the folder name, and keeps it in sync.</label>'+
-    '<textarea id="lnkTxt" rows="5" placeholder="https://docs.google.com/document/d/…&#10;https://drive.google.com/file/d/…&#10;https://drive.google.com/drive/folders/…" style="margin-top:6px"></textarea>'+
-    '<p class="muted" style="font-size:13px;margin:10px 0 0"><b>From Drive or the Drive phone app:</b> pick files or a folder → <i>Organize → Add shortcut</i> → <b>ArNote › Link</b>'+(LINK_URL?' (<a href="'+LINK_URL+'" target="_blank" style="color:var(--acc)">open the Link folder</a>)':'')+'. They show up in your Inbox within 15 minutes.</p>',
-    '<span class="grow"></span><button class="btn" id="lnkC">Cancel</button><button class="btn primary" id="lnkGo">Link</button>');
-  setTimeout(function(){$('#lnkTxt').focus()},30);
+    '<div class="tabs" id="lkTabs" style="margin-bottom:8px"><button data-t="browse" class="on">Browse Drive</button><button data-t="paste">Paste links</button></div>'+
+    '<div id="lkBrowse"><div class="setrow" style="margin:0 0 6px"><input class="field" id="lkQ" placeholder="Search Drive by name…" autocomplete="off" style="flex:1"></div>'+
+      '<div class="crumbs" id="lkCr" style="margin:4px 0 6px;font-size:14px"></div><div id="lkList" class="pick" style="max-height:46vh;min-height:260px"></div></div>'+
+    '<div id="lkPaste" style="display:none"><label class="muted" style="font-size:13px">Paste Drive links (one or more). A folder link links every file in it into the Cabinet, tagged with the folder name, and keeps it in sync.</label>'+
+      '<textarea id="lnkTxt" rows="5" placeholder="https://docs.google.com/document/d/…&#10;https://drive.google.com/drive/folders/…" style="margin-top:6px"></textarea>'+
+      '<p class="muted" style="font-size:13px;margin:10px 0 0"><b>From the Drive app:</b> Organize → Add shortcut → <b>ArNote › Link</b>'+(LINK_URL?' (<a href="'+LINK_URL+'" target="_blank" style="color:var(--acc)">Link folder</a>)':'')+'. Shows up within 15 minutes.</p></div>',
+    '<span class="grow muted" id="lkInfo" style="font-size:13px"></span><button class="btn" id="lnkC">Cancel</button><button class="btn" id="lkFolder" style="display:none">Link this folder</button><button class="btn primary" id="lnkGo">Link</button>');
   $('#lnkC').onclick=closeModal;
-  $('#lnkGo').onclick=function(){var b=this,t=$('#lnkTxt').value.trim();if(!t)return;b.disabled=true;b.textContent='Linking…';
-    call('api_linkFiles',t).then(function(r){closeModal();
+  $$('#lkTabs button').forEach(function(b){b.onclick=function(){st.tab=b.dataset.t;$$('#lkTabs button').forEach(function(x){x.classList.toggle('on',x===b)});
+    $('#lkBrowse').style.display=st.tab==='browse'?'':'none';$('#lkPaste').style.display=st.tab==='paste'?'':'none';info();if(st.tab==='paste')$('#lnkTxt').focus()}});
+  function icon(it){return it.folder?'📁':/image\//.test(it.mime)?'🖼️':/pdf/.test(it.mime)?'📕':/spreadsheet|excel|csv/.test(it.mime)?'📊':/presentation|powerpoint/.test(it.mime)?'📽️':/document|word|text/.test(it.mime)?'📄':'📎'}
+  function info(){var n=Object.keys(st.sel).length;
+    if(st.tab==='paste'){$('#lkInfo').textContent='';$('#lnkGo').textContent='Link';$('#lkFolder').style.display='none';return}
+    $('#lkInfo').textContent=n?n+' selected':'Tick files or folders, or open a folder';
+    $('#lnkGo').textContent=n?'Link '+n:'Link';$('#lnkGo').disabled=!n;
+    var inFolder=st.data&&!st.q&&st.where!=='root'&&st.where!=='shared';
+    $('#lkFolder').style.display=inFolder?'':'none';
+    if(inFolder){$('#lkFolder').disabled=!!st.data.synced;$('#lkFolder').textContent=st.data.synced?'Folder already syncing':'Link this whole folder'}}
+  function load(where,q){st.where=where;st.q=q||'';$('#lkList').innerHTML='<p class="muted" style="padding:10px">Loading…</p>';
+    call('api_driveList',where,st.q).then(function(d){if(!$('#lkList'))return;st.data=d;draw()}).catch(function(){if($('#lkList'))$('#lkList').innerHTML='<p class="muted" style="padding:10px">Could not load this folder.</p>'})}
+  function draw(){var d=st.data;
+    var cr='<button class="cr" data-w="root">My Drive</button><span class="sep">·</span><button class="cr" data-w="shared">Shared with me</button>';
+    if(d.q) cr='<span class="muted">Results for “'+esc(d.q)+'”</span> <button class="cr" data-w="root">✕ clear</button>';
+    else if(d.where==='shared') cr='<button class="cr" data-w="root">My Drive</button><span class="sep">·</span><b>Shared with me</b>';
+    else if(d.path.length) cr=(d.path[0].id==='shared'?'':'<button class="cr" data-w="root">My Drive</button>')+d.path.map(function(p,i){return (i||d.path[0].id!=='shared'?'<span class="sep">›</span>':'')+(i<d.path.length-1?'<button class="cr" data-w="'+esc(p.id)+'">'+esc(p.name)+'</button>':'<b>'+esc(p.name)+'</b>')}).join('');
+    else cr='<b>My Drive</b><span class="sep">·</span><button class="cr" data-w="shared">Shared with me</button>';
+    $('#lkCr').innerHTML=cr;
+    $('#lkList').innerHTML=d.items.length?d.items.map(function(it){var dis=it.linked||it.synced;
+      return '<div class="trow" data-id="'+esc(it.id)+'"><input type="checkbox" data-id="'+esc(it.id)+'"'+(st.sel[it.id]?' checked':'')+(dis?' disabled':'')+'>'+
+        '<span class="nm"'+(it.folder?' data-open="1"':'')+' title="'+esc(it.name)+'">'+icon(it)+' '+esc(it.name)+(it.folder?' <span class="path">›</span>':'')+'</span>'+
+        (it.linked?'<span class="c">🔗 linked</span>':it.synced?'<span class="c">syncing</span>':'')+'</div>'}).join(''):'<p class="muted" style="padding:10px">Nothing here.</p>';
+    $$('#lkCr [data-w]').forEach(function(b){b.onclick=function(){$('#lkQ').value='';load(b.dataset.w)}});
+    $$('#lkList [data-open]').forEach(function(el){el.onclick=function(){load(el.closest('.trow').dataset.id)}});
+    $$('#lkList .nm:not([data-open])').forEach(function(el){el.onclick=function(){var c=el.closest('.trow').querySelector('input');if(!c.disabled){c.checked=!c.checked;c.onchange()}}});
+    $$('#lkList input[type=checkbox]').forEach(function(c){c.onchange=function(){if(c.checked)st.sel[c.dataset.id]=1;else delete st.sel[c.dataset.id];info()}});
+    info()}
+  var qt=null; $('#lkQ').oninput=function(){var v=this.value.trim();clearTimeout(qt);qt=setTimeout(function(){load(v?'root':st.where==='shared'?'shared':'root',v)},350)};
+  function doLink(text,label){var b=$('#lnkGo');b.disabled=true;b.textContent='Linking…';$('#lkFolder').disabled=true;
+    call('api_linkFiles',text).then(function(r){closeModal();
       (r.notes||[]).forEach(function(n){if(!S.byId[n.id]){S.notes.push(n);S.byId[n.id]=n}});
-      if((r.folders||[]).length) return load().then(function(){return r});
-      return r;
+      return ((r.folders||[]).length?load_all():Promise.resolve()).then(function(){return r});
     }).then(function(r){refreshInboxCount();
       var msg=[]; if(r.notes.length) msg.push('Linked '+r.notes.length+' file'+(r.notes.length>1?'s':''));
       (r.folders||[]).forEach(function(f){msg.push('folder “'+f.name+'” → Cabinet')});
-      if(r.already) msg.push(r.already+' already linked'); if(r.failed) msg.push(r.failed+' link'+(r.failed>1?'s':'')+' not found');
+      if(r.already) msg.push(r.already+' already linked'); if(r.failed) msg.push(r.failed+' not found');
       toast(msg.join(' · ')||'Nothing to link'); rerender();
-    }).catch(function(){b.disabled=false;b.textContent='Link'});
-  };
+    }).catch(function(){b.disabled=false;info()});}
+  $('#lnkGo').onclick=function(){ if(st.tab==='paste'){var t=$('#lnkTxt').value.trim();if(t)doLink(t);return}
+    var ids=Object.keys(st.sel); if(ids.length) doLink(ids.join('\n')); };
+  $('#lkFolder').onclick=function(){doLink(st.where)};
+  load('root');
 }
+function load_all(){return load()}
 /* ---------- print ---------- */
 function printNotes(ids){
   ids=ids.filter(function(id){return S.byId[id]}); if(!ids.length) return;
