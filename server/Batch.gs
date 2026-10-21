@@ -77,6 +77,7 @@ function api_renameTag(oldName, newName) {
     if (String(tags[i][0]) === oldName) { if (exists) tagSh.deleteRow(i + 1); else tagSh.getRange(i + 1, 1).setValue(newName); }
   }
   retagNotes_(function (tg) { var out = []; tg.forEach(function (g) { g = g === oldName ? newName : g; if (out.indexOf(g) < 0) out.push(g); }); return out; });
+  tagRenamed_(oldName, newName);
   return true;
 }
 
@@ -100,6 +101,7 @@ function api_deleteTag(name) {
     if (String(tags[i][0]) === name) tagSh.deleteRow(i + 1);
   }
   retagNotes_(function (tg) { return tg.filter(function (g) { return g !== name; }); });
+  tagDeleted_(name);
   return true;
 }
 
@@ -375,6 +377,10 @@ function doPost(e) {
   var out;
   try {
     var req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    if (typeof req.s === 'string' && req.s) {   // read-only share link (see Share section)
+      out = { ok: true, result: shareDispatch_(req.s, String(req.fn || ''), Array.isArray(req.a) ? req.a : []) };
+      return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+    }
     var key = props_().getProperty('apiKey');
     if (!key || typeof req.k !== 'string' || req.k !== key) throw new Error('Not authorized: this device needs to be paired again');
     var fn = String(req.fn || '');
@@ -473,9 +479,10 @@ function linkTitle_(f) {
 
 function createLinkedNote_(f, notebook, tags, index) {
   if (index[f.getId()]) return null;
-  var now = new Date(), id = Utilities.getUuid();
-  var n = { id: id, title: linkTitle_(f), notebook: notebook || 'Inbox', tags: (tags || []).join(TAG_SEP), created: now, updated: now,
-    docId: f.getId(), starred: false, source: 'link', sourceUrl: f.getUrl(), author: '', attachments: 0 };
+  var now = new Date(), id = Utilities.getUuid(), owner = fileOwner_(f), acct = accountTagFor_(owner);
+  tags = (tags || []).slice(); if (acct && tags.indexOf(acct) < 0) tags.push(acct);
+  var n = { id: id, title: linkTitle_(f), notebook: notebook || 'Inbox', tags: tags.join(TAG_SEP), created: now, updated: now,
+    docId: f.getId(), starred: false, source: 'link', sourceUrl: f.getUrl(), author: owner, attachments: 0 };
   ss_().getSheetByName('Notes').appendRow(noteToRow_(n));
   index[f.getId()] = id;
   return { id: id, title: n.title, notebook: n.notebook, tags: tags || [], created: now.toISOString(), updated: now.toISOString(),
@@ -683,4 +690,141 @@ function api_driveList(where, q) {
     if (id !== myRoot) path.unshift({ id: 'shared', name: 'Shared with me' });
   }
   return { where: where, q: q || '', path: path, items: items, synced: !!synced[where] };
+}
+
+/* ---------------- Account tags ----------------
+ * Linked files get a tag for the Google account that owns them (under the parent tag "Accounts").
+ * The tag is an ordinary tag: rename it on the Tags page and the account keeps using the new name.
+ * Map lives in Script Property 'accountTags' {email: tagName}; '' means "don't tag this account".
+ */
+function accountMap_() { try { return JSON.parse(props_().getProperty('accountTags') || '{}'); } catch (e) { return {}; } }
+function saveAccountMap_(m) { props_().setProperty('accountTags', JSON.stringify(m)); }
+
+function defaultAccountTag_(email) {
+  var parts = String(email).toLowerCase().split('@'), local = parts[0], dom = (parts[1] || '').split('.')[0];
+  return '@' + local + (dom && dom !== 'gmail' && dom !== 'googlemail' ? '-' + dom : '');
+}
+
+function accountTagFor_(email) {
+  if (!email) return '';
+  var m = accountMap_();
+  if (!(email in m)) {
+    m[email] = defaultAccountTag_(email);
+    saveAccountMap_(m);
+    ensureTagParent_('Accounts', ''); ensureTagParent_(m[email], 'Accounts');
+  }
+  return m[email];
+}
+
+function fileOwner_(f) { try { var o = f.getOwner(); return o ? o.getEmail() : ''; } catch (e) { return ''; } }
+
+/** Settings → Accounts: tags any linked notes that don't have their account tag yet, then lists accounts. */
+function api_accounts() {
+  var t = notesTable_(), counts = {}, start = Date.now();
+  t.rows.forEach(function (r, i) {
+    if (r[col_('source')] !== 'link') return;
+    var email = String(r[col_('author')] || '');
+    if (!email && Date.now() - start < 60000) {
+      try { email = fileOwner_(DriveApp.getFileById(r[col_('docId')])); } catch (e) {}
+      if (email) t.sh.getRange(i + 2, col_('author') + 1).setValue(email);
+    }
+    if (!email) return;
+    counts[email] = (counts[email] || 0) + 1;
+    var tag = accountTagFor_(email), tags = splitTags_(r[col_('tags')]);
+    if (tag && tags.indexOf(tag) < 0) { tags.push(tag); t.sh.getRange(i + 2, col_('tags') + 1).setValue(tags.join(TAG_SEP)); }
+  });
+  var m = accountMap_();
+  return Object.keys(m).map(function (e) { return { email: e, tag: m[e], count: counts[e] || 0 }; })
+    .sort(function (a, b) { return b.count - a.count; });
+}
+
+/** Keep account tags and share links pointing at the right tag after a rename / delete. */
+function tagRenamed_(oldName, newName) {
+  var m = accountMap_(), ch = false;
+  Object.keys(m).forEach(function (e) { if (m[e] === oldName) { m[e] = newName; ch = true; } });
+  if (ch) saveAccountMap_(m);
+  var s = shares_(), ch2 = false;
+  s.forEach(function (x) { if (x.tag === oldName) { x.tag = newName; ch2 = true; } });
+  if (ch2) saveShares_(s);
+}
+function tagDeleted_(name) {
+  var m = accountMap_(), ch = false;
+  Object.keys(m).forEach(function (e) { if (m[e] === name) { m[e] = ''; ch = true; } });   // stop tagging that account
+  if (ch) saveAccountMap_(m);
+  var s = shares_(), ch2 = false;
+  s.forEach(function (x) { if (x.tag === name && x.active) { x.active = false; ch2 = true; } });
+  if (ch2) saveShares_(s);
+}
+
+/* ---------------- Share links ----------------
+ * A share link shows one tag's notes (including its sub-tags) read-only: list, preview, print, attachments.
+ * Each link has its own secret token; the app sends {s: token, fn: 'share_x'} instead of the private key.
+ * Script Property 'shares' = [{id, token, tag, label, created, active}]
+ */
+function shares_() { try { return JSON.parse(props_().getProperty('shares') || '[]'); } catch (e) { return []; } }
+function saveShares_(s) { props_().setProperty('shares', JSON.stringify(s)); }
+
+function shareScope_(tag) {
+  var kids = {}; readTable_('Tags').forEach(function (t) { var p = String(t.parent || ''); (kids[p] = kids[p] || []).push(String(t.name)); });
+  var set = {}; (function walk(x) { set[x] = 1; (kids[x] || []).forEach(walk); })(tag);
+  var notes = readTable_('Notes').filter(function (n) { return splitTags_(n.tags).some(function (g) { return set[g]; }); });
+  var ids = {}; notes.forEach(function (n) { ids[n.id] = n; });
+  return { notes: notes, ids: ids, set: set };
+}
+
+function api_shares() {
+  var counts = {};
+  return shares_().map(function (s) {
+    if (!(s.tag in counts)) counts[s.tag] = shareScope_(s.tag).notes.length;
+    return { id: s.id, token: s.token, tag: s.tag, label: s.label, created: s.created, active: !!s.active, count: counts[s.tag] };
+  });
+}
+
+function api_createShare(tag, label) {
+  tag = String(tag || '').trim(); if (!tag) throw new Error('Pick a tag to share');
+  var s = shares_();
+  var token = Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, Utilities.getUuid() + Utilities.getUuid() + Date.now())).replace(/=+$/, '');
+  var x = { id: Utilities.getUuid().slice(0, 8), token: token, tag: tag, label: String(label || '').trim() || 'Shared link', created: new Date().toISOString(), active: true };
+  s.push(x); saveShares_(s);
+  x.count = shareScope_(tag).notes.length;
+  return x;
+}
+
+function api_updateShare(id, ch) {
+  var s = shares_(), x = s.filter(function (y) { return y.id === id; })[0];
+  if (!x) throw new Error('Link not found');
+  if (ch.label !== undefined) x.label = String(ch.label).trim() || x.label;
+  if (ch.active !== undefined) x.active = !!ch.active;
+  saveShares_(s); return true;
+}
+
+function api_deleteShare(id) { saveShares_(shares_().filter(function (y) { return y.id !== id; })); return true; }
+
+/** Everything a share link is allowed to do. Nothing outside the shared tag is reachable. */
+function shareDispatch_(token, fn, a) {
+  var sh = shares_().filter(function (x) { return x.token === token; })[0];
+  if (!sh || !sh.active) throw new Error('This link has been switched off. Ask the person who shared it for a new one.');
+  var sc = shareScope_(sh.tag);
+  function inScope(id) { return !!sc.ids[id]; }
+  if (fn === 'share_info') return { label: sh.label, tag: sh.tag, count: sc.notes.length };
+  if (fn === 'share_list') return sc.notes.map(function (n) {
+    return { id: n.id, title: String(n.title), updated: iso_(n.updated), created: iso_(n.created), link: n.source === 'link', att: +n.attachments || 0,
+      tags: splitTags_(n.tags).filter(function (g) { return sc.set[g]; }) };
+  });
+  if (fn === 'share_view') {
+    if (!inScope(a[0])) throw new Error('Not part of this shared list');
+    var v = api_noteView(a[0]);
+    return { html: v.html, atts: (v.atts || []).map(function (x) { return { fileId: x.fileId, filename: x.filename, bytes: x.bytes, mime: x.mime }; }) };
+  }
+  if (fn === 'share_print') return api_printPdf((a[0] || []).filter(inScope));
+  if (fn === 'share_thumbs') return api_thumbs((a[0] || []).filter(inScope));
+  if (fn === 'share_att') {
+    if (!inScope(a[0])) throw new Error('Not part of this shared list');
+    var att = readTable_('Attachments').filter(function (x) { return x.noteId === a[0] && x.fileId === a[1]; })[0];
+    if (!att) throw new Error('Attachment not found');
+    var f = DriveApp.getFileById(att.fileId);
+    if (f.getSize() > 20 * 1024 * 1024) throw new Error('This file is too big to open here');
+    return { name: f.getName(), mime: f.getMimeType(), b64: Utilities.base64Encode(f.getBlob().getBytes()) };
+  }
+  throw new Error('Not allowed');
 }

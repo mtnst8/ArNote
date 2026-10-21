@@ -43,6 +43,20 @@ Keep files where they are in Drive and still have them in ArNote:
 
 ArNote never renames, edits, stars or deletes a linked file. "Remove link" only removes the note.
 
+## Other Google accounts
+
+Linked files are tagged with the Google account that owns them (for example `@brian-mountainstatebrewing`), under the tag **Accounts**. To bring in files from a second account, such as a work account, share its folders from that account with the Google account your ArNote runs in. Then link them from **🔗 Link Drive files → Shared with me**. Rename account tags like any other tag. **Settings → Google accounts** lists them.
+
+## Sharing a tag with other people
+
+Open a tag and choose **Share…** (or ⋯ → Share… on the Tags page). Type who it's for and **Create link**, then send them the link.
+
+- People with the link see that tag's notes, including sub-tags, read-only. They can search, read, print and download attachments. They don't need a Google account or their own ArNote.
+- Notes you add to the tag later show up for them automatically.
+- Give each person or group their own link, so you can **Switch off** or delete one without affecting the others. **Settings → Shared links** lists them all.
+- Renaming the tag keeps its links working. Deleting the tag switches its links off.
+- A share link only reaches the notes in that tag. It can't change anything or see the rest of your notes.
+
 ## Printing
 
 Select notes and choose **🖨 Print** (or Print on a single note). Google Docs are combined into one PDF; other files come as their own PDFs.
@@ -56,4 +70,4 @@ Select notes and choose **🖨 Print** (or Print on a single note). Google Docs 
 
 ## Planned
 
-- One shared server for several people, plus sharing notes between ArNote users.
+- One shared server for several people, plus two-way sharing between ArNote users.

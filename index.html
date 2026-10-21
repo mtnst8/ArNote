@@ -201,6 +201,13 @@ nav button svg{display:none}
 .setrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}
 .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;word-break:break-all}
 body.unpaired #side{display:none}body.unpaired main{margin-left:auto!important}
+body.guest #actbar,body.guest .row .nb{display:none!important}
+.ghead{margin:18px 0 12px}.ghead h1{margin:2px 0;font-size:24px;color:var(--acc)}.gtitle{font-size:20px;margin:12px 0 2px}
+.gban{background:var(--acc2);border-radius:10px;padding:8px 12px;margin:12px 0;font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.shrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:space-between;border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:6px 0;background:var(--card)}
+.shrow.off{opacity:.6}.shl{display:flex;flex-direction:column;min-width:0}.shl span{font-size:12px}.shb{display:flex;gap:6px;flex-wrap:wrap}
+.acrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0}.acrow .mono{flex:1;min-width:160px}
+.tshare{margin-left:auto}
 </style>
 </head>
 <body>
@@ -361,7 +368,7 @@ function bindRows(ids,onOpen){
 }
 function endSelect(){S.sel={};lastClicked=null;paintSel()}
 function paintSel(){
-  var n=Object.keys(S.sel).length;
+  var n=Object.keys(S.sel).length; if(G){guestPaint();}
   $$('.row[data-id]').forEach(function(r){var on=!!S.sel[r.dataset.id];r.classList.toggle('sel',on);var c=r.querySelector('.cb');if(c)c.checked=on});
   $('#actbar').classList.toggle('on',n>0); document.body.classList.toggle('selmode',n>0);
   $('#selN').textContent=n+' selected';
@@ -534,8 +541,9 @@ function bindHome(){
 function viewAll(){ var arr=byRecent(S.notes); $('#main').innerHTML=section('All notes ('+arr.length+')',arr); bindRows(); }
 function viewList(o){ S.lastList=o;
   if(o.tag){ if(!S.parent.hasOwnProperty(o.tag)){go('tags');return} o.notes=tagNotes(o.tag);
-    $('#main').innerHTML=tagCrumbs(o.tag)+(o.notes.length?'<div class="list">'+o.notes.map(rowHtml).join('')+'</div>':'<p class="muted">No notes with this tag yet.</p>');
+    $('#main').innerHTML=tagCrumbs(o.tag).replace('</div>','<button class="btn small tshare" id="tShare">Share…</button></div>')+(o.notes.length?'<div class="list">'+o.notes.map(rowHtml).join('')+'</div>':'<p class="muted">No notes with this tag yet.</p>');
     $$('#main [data-crumb]').forEach(function(b){b.onclick=function(){var c=b.dataset.crumb;if(c)showTag(c);else go('tags')}});
+    $('#tShare').onclick=function(){shareDialog(o.tag)};
   } else $('#main').innerHTML=section(esc(o.title),o.notes,o.empty);
   bindRows(); }
 function isSplit(){return window.innerWidth>=900}
@@ -672,9 +680,10 @@ function load_all(){return load()}
 /* ---------- print ---------- */
 function printNotes(ids){
   ids=ids.filter(function(id){return S.byId[id]}); if(!ids.length) return;
+  var pr=G?gCall('share_print',ids):call('api_printPdf',ids);
   modal('Print '+ids.length+' note'+(ids.length>1?'s':''),'Getting PDFs ready…','<div id="prl"><p class="muted">This can take a few seconds per note.</p></div>','<span class="grow"></span><button class="btn" id="prC">Close</button>');
   $('#prC').onclick=closeModal;
-  call('api_printPdf',ids).then(function(r){
+  pr.then(function(r){
     var el=$('#prl'); if(!el) return;
     el.innerHTML=(r.files||[]).map(function(f,i){
       var label=esc(f.name)+(f.count>1?' <span class="muted">('+f.count+' notes in one file)</span>':'');
@@ -684,7 +693,7 @@ function printNotes(ids){
     $$('#prl [data-pf]').forEach(function(b){b.onclick=function(){var f=r.files[+b.dataset.pf];
       var bin=atob(f.b64),u8=new Uint8Array(bin.length);for(var k=0;k<bin.length;k++)u8[k]=bin.charCodeAt(k);
       var url=URL.createObjectURL(new Blob([u8],{type:f.mime||'application/pdf'}));window.open(url,'_blank');}});
-  }).catch(function(){var el=$('#prl');if(el)el.innerHTML='<p class="muted">Could not prepare the PDFs.</p>'});
+  }).catch(function(e){var el=$('#prl');if(el)el.innerHTML='<p class="muted">Could not prepare the PDFs.'+(G?' '+esc(e.message):'')+'</p>'});
 }
 function readB64(f){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){res(String(r.result).split(',')[1]||'')};r.onerror=rej;r.readAsDataURL(f)})}
 /** Phone photos arrive as IMG_20261021_095512.jpg and the like: give them a readable name instead. */
@@ -777,11 +786,11 @@ function tagCrumbs(t){
 function tagMenu(t,anchor){
   closeMenu();
   var m=document.createElement('div');m.className='menu';m.id='menu';
-  m.innerHTML='<button data-a="open">Show notes</button><button data-a="sub">New sub-tag…</button><button data-a="rename">Rename / merge…</button><button data-a="move">Change parent tag…</button><button data-a="delete" style="color:var(--warn)">Delete tag…</button>';
+  m.innerHTML='<button data-a="open">Show notes</button><button data-a="share">Share…</button><button data-a="sub">New sub-tag…</button><button data-a="rename">Rename / merge…</button><button data-a="move">Change parent tag…</button><button data-a="delete" style="color:var(--warn)">Delete tag…</button>';
   document.body.appendChild(m);
   var r=anchor.getBoundingClientRect();m.style.top=Math.min(r.bottom+4,window.innerHeight-200)+'px';m.style.left=Math.max(8,Math.min(r.right-170,window.innerWidth-180))+'px';
   m.onclick=function(e){var a=e.target.dataset.a;if(!a)return;closeMenu();
-    if(a==='open')showTag(t); else if(a==='sub')tagDialog('new',t); else tagDialog(a,t)};
+    if(a==='open')showTag(t); else if(a==='share')shareDialog(t); else if(a==='sub')tagDialog('new',t); else tagDialog(a,t)};
   setTimeout(function(){document.addEventListener('click',closeMenu,{once:true})},0);
 }
 function closeMenu(){var m=$('#menu');if(m)m.remove()}
@@ -1043,6 +1052,8 @@ function viewSettings(){
     '<h3 style="margin:16px 0 4px;font-size:15px">Add another device</h3>'+
     '<p class="muted" style="margin:0 0 8px;font-size:13px">Open this pairing link on your phone or another computer (email it to yourself). Anyone with this link can open your notes — keep it private.</p>'+
     '<div class="setrow"><button class="btn primary" id="cpPair">Copy pairing link</button>'+(navigator.share?'<button class="btn" id="shPair">Share…</button>':'')+'</div>'+
+    '<h3 style="margin:16px 0 4px;font-size:15px">Shared links</h3><div id="sset" class="muted" style="font-size:13px">Loading…</div>'+
+    '<h3 style="margin:16px 0 4px;font-size:15px">Google accounts</h3><div id="acct" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Linked Drive folders</h3><div id="lfold" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">This device</h3>'+
     '<div class="setrow"><button class="btn" id="reload">Reload notes</button><button class="btn danger" id="unpair">Unpair this device</button></div>'+
@@ -1053,8 +1064,122 @@ function viewSettings(){
     el.innerHTML=fs.length?fs.map(function(f){return '<div class="setrow"><span>📁 '+esc(f.name)+'</span><button class="btn small" data-uw="'+esc(f.id)+'">Stop syncing</button></div>'}).join('')+
       '<p style="margin:4px 0 0">New files in these folders are added to the Cabinet every 15 minutes. Stopping keeps the notes already made.</p>':'None yet. Link a folder from Inbox → 🔗 Link Drive files.';
     $$('#lfold [data-uw]').forEach(function(b){b.onclick=function(){call('api_unwatchFolder',b.dataset.uw).then(function(){toast('Folder no longer syncs');viewSettings()})}});}).catch(function(){});
+  function drawShares(){call('api_shares').then(function(all){var el=$('#sset');if(!el)return;
+    el.innerHTML=(all.length?shareRows(all,true):'<p style="margin:4px 0">None yet. Open a tag and choose <b>Share…</b> to give someone a read-only link to its notes.</p>');
+    bindShareRows('#sset',all,drawShares)}).catch(function(){})}
+  drawShares();
+  call('api_accounts').then(function(ac){var el=$('#acct');if(!el)return;
+    el.innerHTML=(ac.length?ac.map(function(a){return '<div class="acrow"><span class="mono">'+esc(a.email)+'</span>'+
+      (a.tag?'<button class="chip" data-at="'+esc(a.tag)+'">'+esc(a.tag)+'</button><span>'+a.count+' linked</span><button class="btn small" data-ar="'+esc(a.tag)+'">Rename tag</button>':'<span>not tagged (tag was deleted)</span>')+'</div>'}).join(''):'')+
+      '<p style="margin:6px 0 0">Linked Drive files are tagged with the Google account that owns them, under <b>Accounts</b>. To bring in files from another account (like a work account), share its folders with <b>'+esc(S.user||'this account')+'</b> from that account, then link them here from Inbox → 🔗 Link Drive files → Shared with me.</p>';
+    $$('#acct [data-at]').forEach(function(b){b.onclick=function(){showTag(b.dataset.at)}});
+    $$('#acct [data-ar]').forEach(function(b){b.onclick=function(){tagDialog('rename',b.dataset.ar)}});
+    load(true).catch(function(){});
+  }).catch(function(){});
   $('#reload').onclick=function(){load().then(function(){toast('Notes reloaded');go('home')})};
   $('#unpair').onclick=function(){var b=this;if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Tap again to unpair';return}saveCfg(null);location.hash='';location.reload()};
+}
+
+/* ---------- sharing a tag with other people (read-only links, no Google account needed) ---------- */
+function b64u(s){return btoa(unescape(encodeURIComponent(s))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
+function shareUrl(token){return location.origin+location.pathname+'#share='+b64u(CFG.api+'|'+token)}
+function copyText(t,msg){(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){toast(msg||'Copied')}).catch(function(){prompt('Copy this link:',t)})}
+function shareRows(list,showTag){
+  if(!list.length) return '<p class="muted" style="font-size:13px;margin:6px 0">No links yet.</p>';
+  return list.map(function(s){
+    return '<div class="shrow'+(s.active?'':' off')+'" data-sid="'+esc(s.id)+'"><div class="shl"><b>'+esc(s.label)+'</b>'+
+      '<span class="muted">'+(showTag?'#'+esc(s.tag)+' · ':'')+(s.count!=null?s.count+' notes · ':'')+(s.active?'on':'switched off')+' · made '+fmt(s.created)+'</span></div>'+
+      '<div class="shb">'+(s.active?'<button class="btn small primary" data-sa="copy">Copy link</button>'+(navigator.share?'<button class="btn small" data-sa="send">Send…</button>':''):'')+
+      '<button class="btn small" data-sa="toggle">'+(s.active?'Switch off':'Switch on')+'</button><button class="btn small danger" data-sa="del">Delete</button></div></div>';
+  }).join('');
+}
+function bindShareRows(root,list,after){
+  $$(root+' [data-sa]').forEach(function(b){b.onclick=function(){
+    var id=b.closest('[data-sid]').dataset.sid, s=list.filter(function(x){return x.id===id})[0], a=b.dataset.sa; if(!s) return;
+    if(a==='copy') copyText(shareUrl(s.token),'Link copied: send it to '+s.label);
+    else if(a==='send') navigator.share({title:'ArNote: '+s.label,text:'Here are the notes I\'m sharing with you:',url:shareUrl(s.token)}).catch(function(){});
+    else if(a==='toggle'){b.disabled=true;call('api_updateShare',s.id,{active:!s.active}).then(function(){toast(s.active?'Link switched off':'Link switched on');after()}).catch(function(){b.disabled=false})}
+    else if(a==='del'){if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Tap again';return}
+      b.disabled=true;call('api_deleteShare',s.id).then(function(){toast('Link deleted');after()}).catch(function(){b.disabled=false})}
+  }});
+}
+function shareDialog(tag){
+  var n=tagNotes(tag).length;
+  modal('Share “'+esc(tag)+'”',n+' note'+(n===1?'':'s')+' (including sub-tags) · read-only',
+    '<p class="muted" style="font-size:13px;margin:0 0 10px">Each person or group gets their own link. They can look, search, print and download attachments, but can\'t change anything, and they don\'t need a Google account. Notes you add to this tag later show up for them too. Switch a link off any time.</p>'+
+    '<div id="shl"><p class="muted">Loading…</p></div>'+
+    '<label class="muted" style="font-size:13px;display:block;margin-top:12px">New link: who is it for?</label>'+
+    '<div class="setrow" style="margin-top:4px"><input class="field" id="shWho" placeholder="e.g. Thomas brewers, or Sam" autocomplete="off" style="flex:1;min-width:160px"><button class="btn primary" id="shNew">Create link</button></div>',
+    '<span class="grow"></span><button class="btn" id="shC">Done</button>');
+  $('#shC').onclick=closeModal;
+  function draw(){call('api_shares').then(function(all){var el=$('#shl');if(!el)return;var list=all.filter(function(s){return s.tag===tag});
+    el.innerHTML=shareRows(list,false);bindShareRows('#shl',list,draw)}).catch(function(){})}
+  $('#shWho').onkeydown=function(e){if(e.key==='Enter')$('#shNew').click()};
+  $('#shNew').onclick=function(){var who=$('#shWho').value.trim();if(!who){$('#shWho').focus();return}var b=this;b.disabled=true;
+    call('api_createShare',tag,who).then(function(s){$('#shWho').value='';b.disabled=false;copyText(shareUrl(s.token),'Link for '+who+' copied: paste it into an email or text');draw()}).catch(function(){b.disabled=false})};
+  draw();
+}
+
+/* ---------- guest view: someone opened a share link ---------- */
+var G=null;
+function parseShare(s){var m=String(s||'').match(/#share=([A-Za-z0-9_-]+)/);if(!m)return null;
+  try{var b=m[1],t=decodeURIComponent(escape(atob(b.replace(/-/g,'+').replace(/_/g,'/')+'==='.slice((b.length+3)%4))));var i=t.lastIndexOf('|');if(i<0)return null;return {api:t.slice(0,i),token:t.slice(i+1)}}catch(e){return null}}
+function gCall(fn){var a=[].slice.call(arguments,1);
+  return fetch(G.api,{method:'POST',body:JSON.stringify({s:G.token,fn:fn,a:a})}).then(function(r){if(!r.ok)throw new Error('Server error '+r.status);return r.json()})
+    .then(function(j){if(!j.ok)throw new Error(j.error||'Server error');return j.result});
+}
+function guestStart(sh,asOwner){
+  G={api:sh.api,token:sh.token,owner:asOwner||'',notes:[],q:''};
+  document.body.classList.add('unpaired','guest');
+  $('#main').innerHTML='<div class="loading">Loading shared notes…</div>';
+  Promise.all([gCall('share_info'),gCall('share_list')]).then(function(r){
+    G.info=r[0]; G.notes=r[1].sort(function(a,b){return String(b.updated).localeCompare(String(a.updated))});
+    S.byId={}; G.notes.forEach(function(n){n.notebook='';n.starred=false;S.byId[n.id]=n});
+    document.title=G.info.label+' · ArNote'; guestList();
+  }).catch(function(e){
+    $('#main').innerHTML='<div class="pair"><h1>ArNote</h1><p>'+esc(e.message)+'</p>'+(asOwner?'<button class="btn" id="gBack">Back to my notes</button>':'')+'</div>';
+    if($('#gBack')) $('#gBack').onclick=guestExit;
+  });
+}
+function guestExit(){G=null;document.body.classList.remove('guest','unpaired');document.title='ArNote';start()}
+function guestBanner(){return G.owner?'<div class="gban">'+(G.owner==='self'?'You\'re seeing what people with this share link see.':'Someone shared these notes with you.')+' <button class="btn small" id="gBack">Back to my notes</button></div>':''}
+function guestList(){
+  S.view='guest'; S.sel=S.sel||{};
+  var q=G.q.trim().toLowerCase(), arr=G.notes.filter(function(n){return !q||n.title.toLowerCase().indexOf(q)>=0||n.tags.join(' ').toLowerCase().indexOf(q)>=0});
+  $('#main').innerHTML=guestBanner()+'<div class="ghead"><div class="muted" style="font-size:12px">Shared with you · read-only</div><h1>'+esc(G.info.label)+'</h1>'+
+    '<div class="muted">'+G.notes.length+' note'+(G.notes.length===1?'':'s')+' · #'+esc(G.info.tag)+'</div></div>'+
+    '<input class="field" id="gq" type="search" placeholder="Search these notes" value="'+esc(G.q)+'" autocomplete="off">'+
+    '<div class="setrow"><button class="btn small" id="gAll">Select all</button><button class="btn small primary" id="gPrint" disabled>🖨 Print selected</button><span class="muted" id="gN" style="font-size:13px"></span></div>'+
+    (arr.length?'<div class="list">'+arr.map(rowHtml).join('')+'</div>':'<p class="muted">No notes match.</p>');
+  if($('#gBack')) $('#gBack').onclick=guestExit;
+  $('#gq').oninput=function(){G.q=this.value;var p=this.selectionStart;guestList();var f=$('#gq');f.focus();try{f.setSelectionRange(p,p)}catch(e){}};
+  $('#gAll').onclick=function(){var all=arr.every(function(n){return S.sel[n.id]});arr.forEach(function(n){if(all)delete S.sel[n.id];else S.sel[n.id]=1});guestList()};
+  $('#gPrint').onclick=function(){printNotes(Object.keys(S.sel))};
+  bindRows(null,guestNote);
+}
+function guestPaint(){var k=Object.keys(S.sel).length;if($('#gPrint')){$('#gPrint').disabled=!k;$('#gN').textContent=k?k+' selected':''}}
+function guestNote(id){
+  var n=S.byId[id]; if(!n) return; S.view='guestnote'; window.scrollTo(0,0);
+  $('#main').innerHTML=guestBanner()+'<div class="setrow"><button class="btn small" id="gB">← '+esc(G.info.label)+'</button><span class="grow"></span><button class="btn small" id="gP">🖨 Print</button></div>'+
+    '<h1 class="gtitle">'+(n.link?'🔗 ':'')+esc(n.title)+'</h1><div class="muted" style="font-size:12px">Updated '+fmt(n.updated||n.created)+'</div>'+
+    '<div class="atts" id="atts"></div>'+readerHtml();
+  if($('#gBack')) $('#gBack').onclick=guestExit;
+  $('#gB').onclick=guestList; $('#gP').onclick=function(){printNotes([id])};
+  var frame=$('#main .reader');
+  gCall('share_view',id).then(function(v){
+    var h=String(v.html||''),extra='<base target="_blank"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{max-width:none!important;padding:14px 16px!important;margin:0!important;word-wrap:break-word}img{max-width:100%!important;height:auto!important}</style>';
+    h=/<head[^>]*>/i.test(h)?h.replace(/<head[^>]*>/i,function(m){return m+extra}):extra+h;
+    var nf=frame.cloneNode(false);nf.removeAttribute('srcdoc');nf.srcdoc=h;if(frame.isConnected)frame.replaceWith(nf);
+    if((v.atts||[]).length&&$('#atts')){$('#atts').innerHTML=v.atts.map(function(a,i){return '<a href="#" data-ga="'+i+'">📎 '+esc(a.filename)+'</a>'}).join('');
+      $$('#atts [data-ga]').forEach(function(el){el.onclick=function(e){e.preventDefault();var a=v.atts[+el.dataset.ga];toast('Opening '+a.filename+'…');
+        gCall('share_att',id,a.fileId).then(function(f){openB64(f.b64,f.mime,f.name)}).catch(function(e){toast(e.message)})}})}
+  }).catch(function(e){toast(e.message)});
+}
+function openB64(b64,mime,name){
+  var bin=atob(b64),u8=new Uint8Array(bin.length);for(var k=0;k<bin.length;k++)u8[k]=bin.charCodeAt(k);
+  var url=URL.createObjectURL(new Blob([u8],{type:mime||'application/octet-stream'}));
+  if(/^(image\/|application\/pdf|text\/)/.test(mime||'')) window.open(url,'_blank');
+  else {var a=document.createElement('a');a.href=url;a.download=name||'file';document.body.appendChild(a);a.click();a.remove()}
 }
 
 /* ---------- pairing ---------- */
@@ -1103,6 +1228,12 @@ function receiveShare(){
   })}).catch(function(){go('inbox')});
 }
 (function boot(){
+  var sh=parseShare(location.hash);
+  if(sh){history.replaceState(null,'',location.pathname);
+    if(!CFG) try{localStorage.setItem('arnote.share',JSON.stringify(sh))}catch(e){}
+    guestStart(sh,CFG?(CFG.api===sh.api?'self':'other'):'');return;
+  }
+  if(!CFG){var saved=null;try{saved=JSON.parse(localStorage.getItem('arnote.share')||'null')}catch(e){}if(saved&&saved.token){guestStart(saved,false);return}}
   var c=parsePair(location.hash);
   if(c){history.replaceState(null,'',location.pathname+location.search);tryPair(c);return}
   if(CFG) start(); else showPair();
