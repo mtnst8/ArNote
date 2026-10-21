@@ -252,6 +252,7 @@ function rawCall(cfg,fn,a){
 }
 function call(fn){var a=[].slice.call(arguments,1);
   if(!CFG) return Promise.reject(new Error('Not paired'));
+  if(!/^api_(bootstrap|noteView|thumbs|appInfo|homeExtras|driveList|linkedFolders|search|flushHeaders)$/.test(fn)) S.lastCall=Date.now();
   return rawCall(CFG,fn,a).catch(function(e){toast('Error: '+e.message);if(/paired again/.test(e.message)){saveCfg(null);showPair()}throw e});
 }
 function docUrl(docId,edit){return 'https://docs.google.com/document/d/'+docId+(edit?'/edit':'/view')+(S.user?'?authuser='+encodeURIComponent(S.user):'')}
@@ -274,15 +275,33 @@ function fmt(d){if(!d)return'';var x=new Date(d);return x.toLocaleDateString(und
 function store(k,v){try{if(v===undefined)return JSON.parse(localStorage.getItem('arenote.'+k)||'null');localStorage.setItem('arenote.'+k,JSON.stringify(v))}catch(e){return null}}
 
 /* ---------- data ---------- */
-function load(){
-  return call('api_bootstrap').then(function(b){
+function load(quiet){
+  return (quiet?rawCall(CFG,'api_bootstrap',[]):call('api_bootstrap')).then(function(b){
+    S.sig=noteSig(b.notes); S.lastSync=Date.now();
     S.notes=b.notes; S.order=b.bookmarkOrder; S.byId={}; S.user=b.user||'';
     if($('#who')&&S.user) $('#who').innerHTML='<b>'+esc(S.user[0].toUpperCase())+'</b><span>'+esc(S.user)+'</span>';
     b.notes.forEach(function(n){S.byId[n.id]=n});
     setTags(b.tags); refreshInboxCount();
-    call('api_flushHeaders').catch(function(){});
+    if(!quiet) call('api_flushHeaders').catch(function(){});
   });
 }
+function noteSig(arr){return arr.length+'|'+arr.map(function(n){return n.id+n.updated+n.notebook+n.tags.join(',')}).join(';').length+'|'+arr.reduce(function(h,n){var x=n.id+n.updated+n.notebook+n.tags.join(',')+n.title;for(var i=0;i<x.length;i++)h=(h*31+x.charCodeAt(i))|0;return h},7)}
+/* Keep in step with other devices: re-check when the window comes back into view, and every minute while it's open. */
+function syncNow(force){
+  if(!CFG||S.syncing||document.visibilityState!=='visible') return;
+  if(!force&&Date.now()-(S.lastSync||0)<50000) return;
+  if(Date.now()-(S.lastCall||0)<5000) return;            // you just changed something: let it settle first
+  var before=S.sig; S.syncing=true;
+  load(true).then(function(){
+    if(S.sig===before) return;
+    var busy=$('#shade')||(document.activeElement&&/input|textarea|select/i.test(document.activeElement.tagName));
+    if(busy||['note','new','settings'].indexOf(S.view)>=0) return;   // don't pull the page out from under you
+    var y=window.scrollY; rerender(); window.scrollTo(0,y);
+  }).catch(function(){}).then(function(){S.syncing=false});
+}
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')syncNow(Date.now()-(S.lastSync||0)>5000)});
+window.addEventListener('focus',function(){syncNow(Date.now()-(S.lastSync||0)>5000)});
+setInterval(function(){syncNow(false)},60000);
 function setTags(tags){
   S.tags=tags; S.children={}; S.parent={};
   tags.forEach(function(t){S.parent[t.name]=t.parent;(S.children[t.parent]=S.children[t.parent]||[]).push(t.name)});
