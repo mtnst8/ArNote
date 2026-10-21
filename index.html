@@ -150,6 +150,9 @@ nav button svg{display:none}
   body.selmode .split .pcol{top:64px}
   .split .pcol iframe{height:calc(100vh - 300px)}
 }
+.cambtn{display:none}
+@media (max-width:899px){.cambtn{display:flex;flex:none;align-items:center;justify-content:center;width:42px;height:42px;border-radius:50%;border:0;background:var(--acc);color:#fff;cursor:pointer;padding:0}.cambtn svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round}}
+@media (max-width:899px) and (prefers-color-scheme:dark){.cambtn{color:#0f1d16}}
 @media (max-width:899px){nav .newbtn span:before{content:'+ '}nav .newbtn{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}}
 .pair a,.wg a{color:var(--acc)}
 @media (prefers-color-scheme:dark){.btn.primary,#side nav .newbtn,#side nav .newbtn:hover{color:#0f1d16}}
@@ -205,6 +208,8 @@ body.unpaired #side{display:none}body.unpaired main{margin-left:auto!important}
 <header>
   <span class="brand" onclick="go('home')">ArNote</span>
   <input id="q" type="search" placeholder="Search notes" title="Tips: #tag to filter by tag, in:inbox or in:cabinet" autocomplete="off">
+  <button class="cambtn" id="camBtn" aria-label="Add photos" title="Take or choose photos"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.6"/></svg></button>
+  <input type="file" id="camIn" accept="image/*" multiple hidden>
 </header>
 <nav id="nav">
   <button data-v="new" class="newbtn"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Note</span></button>
@@ -604,6 +609,8 @@ var LINK_URL='';
 function linkUrl(n){var u=n.sourceUrl||('https://drive.google.com/file/d/'+n.docId+'/view');return u+(S.user?(u.indexOf('?')<0?'?':'&')+'authuser='+encodeURIComponent(S.user):'')}
 function upBar(){return '<div class="bar upbar"><button class="btn" id="upBtn">＋ Add files</button><button class="btn" id="lnkBtn">🔗 Link Drive files</button><input type="file" id="upIn" multiple hidden>'+
   '<span class="muted">or drag files here'+(DROP_URL?' · bigger files: <a href="'+DROP_URL+'" target="_blank">Drive Drop folder</a>':'')+'</span></div>'}
+$('#camBtn').onclick=function(){$('#camIn').click()};
+$('#camIn').onchange=function(){var fs=[].slice.call(this.files);this.value='';if(fs.length)uploadFiles(fs,{open:true})};
 function bindUp(){var b=$('#upBtn'),i=$('#upIn');if(!b)return;b.onclick=function(){i.click()};if($('#lnkBtn'))$('#lnkBtn').onclick=linkDialog;i.onchange=function(){uploadFiles([].slice.call(i.files));i.value=''}}
 /* ---------- linked Drive files ---------- */
 function linkDialog(){
@@ -680,20 +687,30 @@ function printNotes(ids){
   }).catch(function(){var el=$('#prl');if(el)el.innerHTML='<p class="muted">Could not prepare the PDFs.</p>'});
 }
 function readB64(f){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){res(String(r.result).split(',')[1]||'')};r.onerror=rej;r.readAsDataURL(f)})}
-function uploadFiles(files){
+/** Phone photos arrive as IMG_20261021_095512.jpg and the like: give them a readable name instead. */
+function photoName(f){
+  var ext=(f.name.match(/\.[A-Za-z0-9]{2,5}$/)||['.jpg'])[0];
+  if(!/^image\//.test(f.type||'')) return f.name;
+  if(!/^(IMG|PXL|DSC|DCIM|MVIMG|Screenshot|image|photo)?[_ -]?\d{6,}|^IMG[_-]|^PXL[_-]|^image\.\w+$/i.test(f.name)) return f.name;
+  var d=new Date(f.lastModified||Date.now());
+  return 'Photo '+d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})+' '+d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})+ext;
+}
+function uploadFiles(files,opt){
+  opt=opt||{};
   if(!files.length) return;
   var big=files.filter(function(f){return f.size>UP_MAX}); files=files.filter(function(f){return f.size<=UP_MAX});
   if(big.length) toast(big.length+' file(s) over 35 MB skipped: put those in the Drive Drop folder');
   var done=0, last=null;
   files.reduce(function(p,f,k){return p.then(function(){
     toast('Uploading '+(k+1)+'/'+files.length+': '+f.name);
-    return readB64(f).then(function(b){return call('api_uploadFile',f.name,f.type,b)}).then(function(n){
+    return readB64(f).then(function(b){return call('api_uploadFile',photoName(f),f.type,b)}).then(function(n){
       S.notes.push(n); S.byId[n.id]=n; done++; last=n.id;
     }).catch(function(){});
   })},Promise.resolve()).then(function(){
     refreshInboxCount();
     if(!done) return;
     toast(done+' note'+(done>1?'s':'')+' added to Inbox');
+    if(opt.open){ if(done===1){S.view='note';go('note',last)} else {S.pv=last;go('inbox')} return }   // straight to tagging
     if(S.view==='inbox'){ if(isSplit()&&$('#lcol')){S.pv=last;drawInboxList();renderPv()} else viewInbox() }
   });
 }
