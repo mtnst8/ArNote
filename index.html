@@ -95,6 +95,9 @@ textarea,.field{width:100%;padding:9px 12px;border:1px solid var(--line);border-
 .modal .mf{padding:10px 16px 14px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;align-items:center}
 .modal .mf .grow{flex:1;color:var(--mute);font-size:13px}
 .modal .tree{border:0;padding:0}
+.pp .pptree{max-height:min(46vh,340px);overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:6px}
+.pp .trow.on{background:var(--acc);color:#fff}.pp .trow.on .tw,.pp .trow.on .path{color:#fff}
+.pp .ppcur{font-size:13px;color:var(--mute);margin-bottom:6px}.pp .ppcur b{color:var(--ink)}
 .recent{margin:2px 0 8px}
 .sect{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--mute);margin:10px 0 4px}
 .menu{position:fixed;z-index:40;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:4px 0;min-width:170px}
@@ -800,6 +803,29 @@ function parentOptions(exclude,sel){
   (function walk(p,d){(S.children[p]||[]).forEach(function(t){if(!bad[t])o+='<option value="'+esc(t)+'"'+(t===sel?' selected':'')+'>'+'  '.repeat(d)+esc(t)+'</option>';walk(t,d+1)})})('',0);
   return o;
 }
+/** Expandable, searchable tree for choosing a parent tag (replaces the long drop-down). Value goes in #dp. */
+function parentPicker(){return '<div class="pp"><input type="hidden" id="dp"><div class="ppcur">Selected: <b id="ppCur"></b></div>'+
+  '<input class="field" id="ppf" placeholder="Find a tag…" autocomplete="off"><div class="tree pptree" id="ppt"></div></div>'}
+function bindParentPicker(exclude,sel){
+  var bad={}; if(exclude) descendants(exclude).forEach(function(x){bad[x]=1});
+  var open={}, x=S.parent[sel], g=0; while(x&&g++<12){open[x]=1;x=S.parent[x]} if(sel) open[sel]=1;
+  function setSel(v){sel=v;$('#dp').value=v;$('#ppCur').textContent=v?tagPath(v):'(top level, no parent)'}
+  function row(t,d,state,extra){return '<div class="trow'+(t===sel?' on':'')+'" data-tag="'+esc(t)+'" style="padding-left:'+(10+d*20)+'px">'+
+    '<button type="button" class="tw'+(state?'':' leaf')+'">'+(state==='open'?'▾':'▸')+'</button><span class="nm">'+(t?esc(t):'<i>(top level, no parent)</i>')+extra+'</span></div>'}
+  function draw(){
+    var f=$('#ppf').value.trim().toLowerCase(), h=row('',0,false,'');
+    if(f) S.tags.filter(function(t){return !bad[t.name]&&t.name.toLowerCase().indexOf(f)>=0}).sort(function(a,b){return a.name.localeCompare(b.name)})
+      .forEach(function(t){h+=row(t.name,0,false,t.parent?'<span class="path">'+esc(tagPath(t.parent))+'</span>':'')});
+    else (function walk(p,d){(S.children[p]||[]).forEach(function(t){if(bad[t])return;var kids=(S.children[t]||[]).filter(function(k){return !bad[k]}).length;
+      h+=row(t,d,kids?(open[t]?'open':'closed'):false,'');if(kids&&open[t])walk(t,d+1)})})('',0);
+    $('#ppt').innerHTML=h;
+    $$('#ppt .tw').forEach(function(b){b.onclick=function(){var t=b.closest('.trow').dataset.tag;if(open[t])delete open[t];else open[t]=1;draw()}});
+    $$('#ppt .nm').forEach(function(el){el.onclick=function(){setSel(el.closest('.trow').dataset.tag);draw()}});
+    var on=$('#ppt .trow.on'); if(on&&!f) on.scrollIntoView({block:'nearest'});
+  }
+  $('#ppf').oninput=draw; $('#ppf').onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();var r=$$('#ppt .trow')[1];if(r){setSel(r.dataset.tag);$('#ppf').value='';open[S.parent[r.dataset.tag]]=1;draw()}}};
+  setSel(sel||''); draw();
+}
 function modal(title,sub,body,foot){
   closeModal();
   var sh=document.createElement('div');sh.className='shade';sh.id='shade';
@@ -814,7 +840,7 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'){closeMenu()
 function tagDialog(kind,t){
   var cnt=t?tagCount(t):0, body='', foot='<button class="btn" id="dc">Cancel</button>';
   if(kind==='new'){
-    body='<label class="muted" style="font-size:13px">Name</label><input class="field" id="dn" autocomplete="off"><br><br><label class="muted" style="font-size:13px">Parent tag (nest under)</label><select class="field" id="dp">'+parentOptions('',t)+'</select>';
+    body='<label class="muted" style="font-size:13px">Name</label><input class="field" id="dn" autocomplete="off"><br><br><label class="muted" style="font-size:13px">Nest under</label>'+parentPicker();
     foot+='<button class="btn primary" id="dok">Create</button>';
     modal('New tag','',body,foot);
   } else if(kind==='rename'){
@@ -822,7 +848,7 @@ function tagDialog(kind,t){
     foot+='<button class="btn primary" id="dok">Save</button>';
     modal('Rename tag',esc(tagPath(t)),body,foot);
   } else if(kind==='move'){
-    body='<select class="field" id="dp">'+parentOptions(t,S.parent[t])+'</select>';
+    body=parentPicker();
     foot+='<button class="btn primary" id="dok">Move</button>';
     modal('Move “'+esc(t)+'”','Parent tag (nest under)',body,foot);
   } else if(kind==='delete'){
@@ -831,6 +857,7 @@ function tagDialog(kind,t){
     modal('Delete tag',esc(tagPath(t)),body,foot);
   }
   $('#dc').onclick=closeModal;
+  if($('#ppt')) bindParentPicker(kind==='move'?t:'',kind==='move'?(S.parent[t]||''):(t||''));
   var dn=$('#dn'); if(dn){dn.focus();dn.select();dn.onkeydown=function(e){if(e.key==='Enter')$('#dok').click()}}
   $('#dok').onclick=function(){
     var b=this;b.disabled=true;
@@ -867,7 +894,8 @@ function openTagPanel(ids,onDone,why,prefill){
       hits.forEach(function(t){html+='<div class="trow" data-tag="'+esc(t.name)+'">'+cb(t.name)+'<span class="nm">'+esc(t.name)+'<span class="path">'+esc(tagPath(t.parent))+'</span></span></div>'});
       var exact=S.tags.some(function(t){return t.name.toLowerCase()===f});
       if(!exact) html+='<div class="trow" style="flex-wrap:wrap"><span class="nm" style="cursor:default">+ Create “'+esc(q.value.trim())+'” — parent tag:</span>'+
-        '<select class="field" id="pnp" style="width:auto;max-width:60%;padding:4px 8px">'+parentOptions('','')+'</select><button class="btn small primary" id="pnew">Create</button></div>';
+        '<input class="field" id="pnp" list="pnpl" placeholder="parent: type to find (blank = top level)" autocomplete="off" style="width:auto;flex:1;min-width:150px;padding:4px 8px"><datalist id="pnpl">'+
+        S.tags.map(function(t){return '<option value="'+esc(t.name)+'">'+esc(t.parent?tagPath(t.parent):'')+'</option>'}).join('')+'</datalist><button class="btn small primary" id="pnew">Create</button></div>';
     } else {
       var rec=(store('recentTags')||[]).filter(function(t){return S.parent[t]!==undefined});
       if(rec.length) html+='<div class="sect">Recent</div><div class="recent">'+rec.map(function(t){return '<button class="chip" data-rt="'+esc(t)+'"'+(state[t]===1?' style="background:var(--acc);color:#fff"':'')+'>'+esc(t)+'</button>'}).join('')+'</div>';
@@ -905,7 +933,8 @@ function openTagPanel(ids,onDone,why,prefill){
   function toggle(t){var s=state[t]||0, o=orig[t]||0;
     state[t]= s===0.5?1 : s===1?0 : (o===0.5?0.5:1);   // mixed → all → none → (mixed again)
     draw(); }
-  function createNew(){var name=q.value.trim(),par=$('#pnp').value;if(!name)return;
+  function createNew(){var name=q.value.trim(),par=$('#pnp').value.trim();if(!name)return;
+    if(par&&!S.parent.hasOwnProperty(par)){toast('No tag called “'+par+'”: pick one from the list or leave it blank');$('#pnp').focus();return}
     call('api_createTag',name,par).then(function(){S.tags.push({name:name,parent:par});setTags(S.tags);state[name]=1;q.value='';var x=par;while(x){po[x]=1;x=S.parent[x]}draw();toast('Created “'+name+'”')})}
   function diff(){var add=[],rem=[];Object.keys(state).forEach(function(t){var s=state[t],o=orig[t]||0;if(s===o)return;if(s===1)add.push(t);else if(s===0)rem.push(t)});return{add:add,rem:rem}}
   function info(){var d=diff();$('#pinfo').textContent=(d.add.length?'+'+d.add.length+' ':'')+(d.rem.length?'−'+d.rem.length:'')||'No changes';$('#pa').disabled=!d.add.length&&!d.rem.length}

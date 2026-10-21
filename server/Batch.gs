@@ -711,9 +711,16 @@ function accountTagFor_(email) {
   if (!(email in m)) {
     m[email] = defaultAccountTag_(email);
     saveAccountMap_(m);
-    ensureTagParent_('Accounts', ''); ensureTagParent_(m[email], 'Accounts');
+    var par = accountParent_(m); if (par) ensureTagParent_(par, ''); ensureTagParent_(m[email], par);
   }
   return m[email];
+}
+
+/** New account tags go wherever the existing ones live (so renaming or moving "Accounts" is respected). */
+function accountParent_(m) {
+  var parent = {}; readTable_('Tags').forEach(function (t) { parent[String(t.name)] = String(t.parent || ''); });
+  for (var e in m) if (m[e] && parent.hasOwnProperty(m[e])) return parent[m[e]];
+  return 'Accounts';
 }
 
 function fileOwner_(f) { try { var o = f.getOwner(); return o ? o.getEmail() : ''; } catch (e) { return ''; } }
