@@ -104,7 +104,7 @@ function headerLine_(notebook, tags) {
   return 'Notebook: ' + notebook + '  |  Tags: ' + (tags && tags.length ? tags.join(TAG_SEP) : '(none)');
 }
 /* ---------------- Evernote import (one-time) ----------------
- * Expects a Drive folder "AreNote-import" containing notes.jsonl and attachments/<md5>.<ext>
+ * Expects a Drive folder "ArNote-import" containing notes.jsonl and attachments/<md5>.<ext>
  * (made by arenote_extract.ps1 on the laptop). Runs in ~5-minute batches and re-schedules
  * itself until done. Safe to re-run: it resumes where it stopped.
  */
@@ -140,9 +140,9 @@ function clearImportTriggers_() {
 }
 
 function importFolder_() {
-  var it = DriveApp.getFoldersByName('AreNote-import');
+  var it = DriveApp.getFoldersByName('ArNote-import');
   while (it.hasNext()) { var f = it.next(); if (!f.isTrashed() && f.getFilesByName('notes.jsonl').hasNext()) return f; }
-  throw new Error('Could not find the "AreNote-import" folder (with notes.jsonl) in Drive. Upload it first.');
+  throw new Error('Could not find the "ArNote-import" folder (with notes.jsonl) in Drive. Upload it first.');
 }
 
 function loadNotesJsonl_() {
