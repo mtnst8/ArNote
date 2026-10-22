@@ -1007,11 +1007,12 @@ function api_photos(o) {
     if (set && !p.tags.some(function (g) { return set[g]; })) return false;
     if (o.year && p.taken.slice(0, 4) !== String(o.year)) return false;
     if (o.month && p.taken.slice(5, 7) !== String(o.month)) return false;
+    if (o.undated && /^\d{4}-\d\d/.test(p.taken)) return false;
     if (o.folder && p.folder !== o.folder && p.folder.indexOf(o.folder + '/') !== 0) return false;
     return true;
   });
   list.sort(function (a, b) { return a.taken < b.taken ? 1 : a.taken > b.taken ? -1 : 0; });
-  var off = +o.offset || 0, lim = Math.min(+o.limit || 120, 500);
+  var off = +o.offset || 0, lim = Math.min(+o.limit || 120, 1500);
   return { total: list.length, offset: off, items: list.slice(off, off + lim).map(function (p) { delete p.row; return p; }) };
 }
 
@@ -1058,10 +1059,10 @@ function api_photoThumbs(ids) {
 }
 
 /** A big preview for the photo viewer, plus details. */
-function api_photoView(id) {
+function api_photoView(id, metaOnly) {
   var f = driveApi_('files/' + id + '?supportsAllDrives=true&fields=' + encodeURIComponent('name,mimeType,size,webViewLink,thumbnailLink,imageMediaMetadata(time,width,height,cameraMake,cameraModel,location),videoMediaMetadata(durationMillis)'));
   var src = '';
-  try {
+  if (!metaOnly) try {
     var hdr = { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() };
     if (!f.thumbnailLink && /^image\/(jpeg|png|gif|webp)$/.test(f.mimeType) && +f.size < 2 * 1024 * 1024) {
       var r0 = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + id + '?alt=media&supportsAllDrives=true', { headers: hdr, muteHttpExceptions: true });
@@ -1102,4 +1103,20 @@ function retagPhotos_(fn) {
   var rng = sh.getRange(2, 6, sh.getLastRow() - 1, 1), v = rng.getValues(), ch = false;
   v.forEach(function (r) { var b = splitTags_(r[0]), a = fn(b.slice()).join(TAG_SEP); if (a !== b.join(TAG_SEP)) { r[0] = a; ch = true; } });
   if (ch) rng.setValues(v);
+}
+
+/** Timeline for the Photos grid: how many photos per month (newest first) for the same filters as api_photos. */
+function api_photoMonths(o) {
+  o = o || {};
+  var rows = photoRows_(), set = o.tag ? tagSet_(o.tag) : null, m = {};
+  rows.forEach(function (p) {
+    if (o.view === 'inbox' && p.status) return;
+    if (o.view === 'filed' && p.status !== 'filed') return;
+    if (set && !p.tags.some(function (g) { return set[g]; })) return;
+    if (o.folder && p.folder !== o.folder && p.folder.indexOf(o.folder + '/') !== 0) return;
+    var k = /^\d{4}-\d\d/.test(p.taken) ? p.taken.slice(0, 7) : '';
+    m[k] = (m[k] || 0) + 1;
+  });
+  var months = Object.keys(m).sort().reverse().map(function (k) { return [k, m[k]]; });
+  return { months: months, total: rows.length };
 }
