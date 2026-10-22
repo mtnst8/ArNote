@@ -61,6 +61,9 @@ iframe{width:100%;height:75vh;border:1px solid var(--line);border-radius:10px;ba
 .atts a{display:inline-block;margin:3px 8px 3px 0;font-size:13px;color:var(--acc)}
 .toast{position:fixed;bottom:84px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:50}
 .toast.on{opacity:.95}
+.toast.undo{pointer-events:auto;display:flex;gap:14px;align-items:center}
+.toast .ub{background:none;border:0;color:#8fe0b4;font-weight:700;cursor:pointer;padding:2px 4px;font-size:14px;text-transform:uppercase;letter-spacing:.4px}
+@media (prefers-color-scheme:dark){.toast .ub{color:#1f6b45}}
 textarea,.field{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);font:inherit}
 .loading{padding:40px;text-align:center;color:var(--mute)}
 /* selection action bar */
@@ -258,7 +261,18 @@ var S = { notes: [], tags: [], byId: {}, children: {}, parent: {}, view: 'home',
 function $(s){return document.querySelector(s)}
 function $$(s){return [].slice.call(document.querySelectorAll(s))}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
-function toast(m){var t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(t._h);t._h=setTimeout(function(){t.classList.remove('on')},2200)}
+function toast(m){var t=$('#toast');if(S.undo&&Date.now()<S.undo.until&&!/^Error/.test(m))return;t.classList.remove('undo');t.textContent=m;t.classList.add('on');clearTimeout(t._h);t._h=setTimeout(function(){t.classList.remove('on')},2200)}
+/** A message with an Undo button that stays up for a few seconds (Ctrl+Z works too). */
+function undoToast(m,fn,ms){ms=ms||7000;var t=$('#toast');
+  if(S.undo&&S.undo.onExpire) S.undo.onExpire();           // a newer action replaces the old undo: commit anything it was holding back
+  var u=S.undo={fn:fn,until:Date.now()+ms,onExpire:null};
+  t.classList.add('undo','on');t.innerHTML='<span>'+esc(m)+'</span><button class="ub" id="undoBtn">Undo</button>';
+  $('#undoBtn').onclick=function(){runUndo()};
+  clearTimeout(t._h);t._h=setTimeout(function(){if(S.undo===u){S.undo=null;if(u.onExpire)u.onExpire()}t.classList.remove('on','undo')},ms);
+  return u;}
+function runUndo(){var u=S.undo,t=$('#toast');if(!u)return;S.undo=null;u.onExpire=null;clearTimeout(t._h);t.classList.remove('undo','on');
+  Promise.resolve(u.fn()).then(function(){toast('Undone')}).catch(function(){})}
+document.addEventListener('keydown',function(e){if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&(e.key==='z'||e.key==='Z')&&S.undo){var tg=(e.target.tagName||'').toLowerCase();if(tg==='input'||tg==='textarea')return;e.preventDefault();runUndo()}});
 /* ---------- server connection (each person runs their own private server; see README) ---------- */
 var CFG=null; try{CFG=JSON.parse(localStorage.getItem('arnote.cfg')||'null')}catch(e){}
 function saveCfg(c){CFG=c;try{if(c)localStorage.setItem('arnote.cfg',JSON.stringify(c));else localStorage.removeItem('arnote.cfg')}catch(e){}}
@@ -434,9 +448,7 @@ $('#aDel').onclick=function(){
   var b=this,ids=Object.keys(S.sel);
   if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Delete '+ids.length+'? Tap again';setTimeout(function(){b.textContent='Delete';delete b.dataset.arm},3500);return}
   delete b.dataset.arm;b.textContent='Delete';
-  ids.forEach(function(id){delete S.byId[id]});S.notes=S.notes.filter(function(n){return S.byId[n.id]});
-  toast('Deleting '+ids.length+'…'); S.sel={}; refreshInboxCount(); rerender(); paintSel();
-  call('api_batchTrash',ids).then(function(n){toast(n+' moved to Drive trash (restorable for 30 days)')});
+  trashLater(ids,'Deleted '+ids.length+' note'+(ids.length>1?'s':'')); S.sel={}; refreshInboxCount(); rerender(); paintSel();
 };
 $('#aPrint').onclick=function(){printNotes(Object.keys(S.sel))};
 $('#aMerge').onclick=function(){
@@ -466,8 +478,9 @@ $('#aMerge').onclick=function(){
     }).catch(function(){b.disabled=false;b.textContent='Merge'});
   };
 };
-function batch(ch,msg,ids){
+function batch(ch,msg,ids,noUndo){
   ids=ids||Object.keys(S.sel); if(!ids.length) return Promise.resolve();
+  var before={}; ids.forEach(function(id){var n=S.byId[id];if(n)before[id]={tags:n.tags.slice(),notebook:n.notebook,starred:!!n.starred}});
   ids.forEach(function(id){var n=S.byId[id];if(!n)return;
     if(ch.starred!==undefined)n.starred=ch.starred;
     (ch.removeTags||[]).forEach(function(t){n.tags=n.tags.filter(function(g){return g!==t})});
@@ -475,8 +488,41 @@ function batch(ch,msg,ids){
     if(ch.notebook&&!(ch.notebook==='Cabinet'&&!n.tags.length))n.notebook=ch.notebook;
     n.updated=new Date().toISOString();});
   refreshInboxCount(); if(S.view!=='note') {rerender(); paintSel();}
-  return call('api_batchUpdate',ids,ch).then(function(){ if(msg) toast(msg+' ('+ids.length+')') });
+  var p=call('api_batchUpdate',ids,ch);
+  if(!noUndo&&msg) undoToast(msg+(ids.length>1?' ('+ids.length+')':''),function(){return p.then(function(){return undoBatch(before)})});
+  else if(msg) p.then(function(){toast(msg+(ids.length>1?' ('+ids.length+')':''))});
+  return p;
 }
+/** Put notes back the way they were: one server call per group of notes needing the same change. */
+function undoBatch(before){
+  var groups={};
+  Object.keys(before).forEach(function(id){var n=S.byId[id],b=before[id];if(!n)return;
+    var ch={addTags:b.tags.filter(function(t){return n.tags.indexOf(t)<0}),removeTags:n.tags.filter(function(t){return b.tags.indexOf(t)<0})};
+    if(n.notebook!==b.notebook) ch.notebook=b.notebook; if(!!n.starred!==b.starred) ch.starred=b.starred;
+    if(!ch.addTags.length) delete ch.addTags; if(!ch.removeTags.length) delete ch.removeTags;
+    var k=JSON.stringify(ch); if(k==='{}') return; (groups[k]=groups[k]||[]).push(id)});
+  return Promise.all(Object.keys(groups).map(function(k){var ch=JSON.parse(k),ids=groups[k];
+    ids.forEach(function(id){var n=S.byId[id],b=before[id];n.tags=b.tags.slice();n.notebook=b.notebook;n.starred=b.starred});
+    return call('api_batchUpdate',ids,ch)})).then(function(){afterUndo(Object.keys(before))});
+}
+function afterUndo(ids){refreshInboxCount();
+  if(S.view==='note'&&$('#title')&&ids.indexOf($('#title').dataset.id)>=0) viewNote($('#title').dataset.id);
+  else if(S.view==='inbox'&&isSplit()&&$('#pv')){drawInboxList();renderPv()} else if(S.view!=='note') rerender();}
+/* Deleting waits until the Undo message is gone, so Undo simply puts the notes back. */
+S.pendingTrash=[];
+function trashLater(ids,msg){
+  var gone=ids.map(function(id){return S.byId[id]}).filter(Boolean); if(!gone.length) return;
+  gone.forEach(function(n){delete S.byId[n.id]}); S.notes=S.notes.filter(function(n){return S.byId[n.id]});
+  var job={ids:gone.map(function(n){return n.id}),done:false}; S.pendingTrash.push(job);
+  function commit(){if(job.done)return;job.done=true;S.pendingTrash=S.pendingTrash.filter(function(j){return j!==job});
+    call('api_batchTrash',job.ids).catch(function(){})}
+  var u=undoToast(msg,function(){job.done=true;S.pendingTrash=S.pendingTrash.filter(function(j){return j!==job});
+    gone.forEach(function(n){if(!S.byId[n.id]){S.byId[n.id]=n;S.notes.push(n)}});afterUndo(job.ids)});
+  u.onExpire=commit;
+}
+// leaving the app: send any deletes still waiting
+window.addEventListener('pagehide',function(){(S.pendingTrash||[]).forEach(function(j){if(j.done)return;j.done=true;
+  try{fetch(CFG.api,{method:'POST',keepalive:true,body:JSON.stringify({k:CFG.key,fn:'api_batchTrash',a:[j.ids]})})}catch(e){}})});
 
 /* ---------- views ---------- */
 function bookmarks(){
@@ -616,14 +662,13 @@ function renderPv(){
   var ti=$('#pvTitle');
   ti.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();ti.blur()}else if(e.key==='Escape'){ti.value=n.title;ti.blur()}};
   ti.onblur=function(){var v=ti.value.trim();if(!v){ti.value=n.title;return}if(v===n.title)return;
-    n.title=v; n.updated=new Date().toISOString(); drawInboxList();
-    call('api_updateNote',n.id,{title:v}).then(function(){toast('Renamed')})};
+    var old=n.title; n.title=v; n.updated=new Date().toISOString(); drawInboxList();
+    var p=call('api_updateNote',n.id,{title:v}); undoToast('Renamed',function(){return p.then(function(){n.title=old;return call('api_updateNote',n.id,{title:old})}).then(function(){afterUndo([n.id])})})};
   $('#pvFile').onclick=function(){fileNote(n.id)};
   $('#pvOpen').onclick=function(){go('note',n.id)};
   $('#pvDel').onclick=function(){var b=this;
     if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Tap again to delete';setTimeout(function(){if(b.isConnected){b.textContent='Delete';delete b.dataset.arm}},3000);return}
-    var id=n.id; delete S.byId[id]; S.notes=S.notes.filter(function(x){return x.id!==id}); refreshInboxCount(); refreshSplit();
-    var wasLink=n.link; call('api_batchTrash',[id]).then(function(){toast(wasLink?'Link removed (the file is untouched)':'Moved to Drive trash (restorable for 30 days)')});};
+    trashLater([n.id],n.link?'Link removed (the file is untouched)':'Note deleted'); refreshInboxCount(); refreshSplit();};
 }
 function pvMove(d){var o=S.pvOrder||[],i=o.indexOf(S.pv);if(i<0)return;var j=Math.max(0,Math.min(o.length-1,i+d));if(j===i)return;S.pv=o[j];markAct();renderPv();
   var r=$('#lcol .row.act');if(r)r.scrollIntoView({block:'nearest'})}
@@ -639,8 +684,8 @@ function refreshSplit(){
 }
 function fileNote(id,after){
   var n=S.byId[id]; if(!n) return;
-  if(!n.tags.length){openTagPanel([id],function(){if(n.tags.length){batch({notebook:'Cabinet'},'',[id]).then(function(){toast('Filed')});if(after)after()}},'Add at least one tag before filing to Cabinet.');return}
-  batch({notebook:'Cabinet'},'',[id]).then(function(){toast('Filed')}); if(after) after();
+  if(!n.tags.length){openTagPanel([id],function(){if(n.tags.length){batch({notebook:'Cabinet'},'Filed',[id]);if(after)after()}},'Add at least one tag before filing to Cabinet.');return}
+  batch({notebook:'Cabinet'},'Filed',[id]); if(after) after();
 }
 document.addEventListener('keydown',function(e){
   if(S.view!=='inbox'||!isSplit()||$('#shade')||!$('#pv')) return;
@@ -1000,7 +1045,7 @@ function openTagPanel(ids,onDone,why,prefill){
   q.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();var first=$('#pbody .trow[data-tag]');if(first&&q.value.trim()){toggle(first.dataset.tag);q.select()}else if($('#pnew'))createNew();else $('#pa').click()}};
   $('#pc').onclick=closeModal;
   $('#pa').onclick=function(){var d=diff();closeModal();rememberTags(d.add);
-    batch({addTags:d.add,removeTags:d.rem},N>1&&!onDone?'Tags updated':'',ids).then(function(){if(onDone)onDone();else if(S.view==='note')viewNote(ids[0],true)});
+    batch({addTags:d.add,removeTags:d.rem},'Tags updated',ids).then(function(){if(onDone)onDone();else if(S.view==='note')viewNote(ids[0],true)});
     if(S.view==='note'&&!onDone) viewNote(ids[0],true); if(onDone) toast('Saving tags…');};
   draw();
 }
@@ -1064,16 +1109,16 @@ function viewNote(id,keep){
   $('#nprint').onclick=function(){printNotes([id])};
   if($('#ehere')) $('#ehere').onclick=function(){ $('#ehint').textContent='Editing in Google Docs. Changes save automatically. If this says you need access, use Edit in Google Docs instead (this browser is signed in to a different Google account).';
     $('#nbody').innerHTML='<iframe src="https://docs.google.com/document/d/'+n.docId+'/edit?rm=minimal'+(S.user?'&authuser='+encodeURIComponent(S.user):'')+'" allow="clipboard-read; clipboard-write"></iframe>'; this.remove(); S.editing=id; };
-  $('#star').onclick=function(){batch({starred:!n.starred},'',[id]);viewNote(id)};
-  $('#title').onchange=function(){n.title=this.value;call('api_updateNote',n.id,{title:n.title})};
+  $('#star').onclick=function(){batch({starred:!n.starred},n.starred?'Bookmark removed':'Bookmarked',[id]);viewNote(id)};
+  $('#title').onchange=function(){var old=n.title;n.title=this.value;var p=call('api_updateNote',n.id,{title:n.title});
+    undoToast('Renamed',function(){return p.then(function(){n.title=old;return call('api_updateNote',n.id,{title:old})}).then(function(){afterUndo([n.id])})})};
   if($('#file')) $('#file').onclick=function(){
-    if(!n.tags.length){openTagPanel([id],function(){if(n.tags.length){batch({notebook:'Cabinet'},'',[id]).then(function(){toast('Filed')});next()}else viewNote(id)},'Add at least one tag before filing to Cabinet.');return}
-    batch({notebook:'Cabinet'},'',[id]).then(function(){toast('Filed')});next()};
+    if(!n.tags.length){openTagPanel([id],function(){if(n.tags.length){batch({notebook:'Cabinet'},'Filed',[id]);next()}else viewNote(id)},'Add at least one tag before filing to Cabinet.');return}
+    batch({notebook:'Cabinet'},'Filed',[id]);next()};
   if($('#unfile')) $('#unfile').onclick=function(){batch({notebook:'Inbox'},'Moved to Inbox',[id]);viewNote(id)};
   if($('#skip')) $('#skip').onclick=function(){S.triage.push(S.triage.shift());next(true)};
   $('#del').onclick=function(){var b=this;if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Tap again to delete';setTimeout(function(){b.textContent='Delete';delete b.dataset.arm},3000);return}
-    delete S.byId[id];S.notes=S.notes.filter(function(x){return x.id!==id});refreshInboxCount();
-    var wasLink=n.link; call('api_batchTrash',[id]).then(function(){toast(wasLink?'Link removed (the file is untouched)':'Moved to Drive trash')}); next()};
+    trashLater([id],n.link?'Link removed (the file is untouched)':'Note deleted');refreshInboxCount(); next()};
 
   function next(skipped){ if(isTriage){ if(!skipped&&S.triage[0]===id) S.triage.shift(); } refreshInboxCount();
     if(isTriage&&S.triage.length){S.view='note';viewNote(S.triage[0])} else go(isTriage?'inbox':'home'); }
@@ -1085,7 +1130,7 @@ function renderTags(n){
     '<span class="tagadd"><input id="tagIn" placeholder="Add tag…" autocomplete="off"><div id="tagSug" class="tagsug"></div></span>'+
     recent.map(function(t){return '<button class="chip ghost" data-r="'+esc(t)+'" title="'+esc(tagPath(t))+'">+ '+esc(t)+'</button>'}).join('')+
     '<button class="btn small" id="etags">Browse…</button>';
-  bar.querySelectorAll('.chip[data-i]').forEach(function(c){c.onclick=function(){var t=n.tags[+c.dataset.i];batch({removeTags:[t]},'',[n.id]);renderTags(n)}});
+  bar.querySelectorAll('.chip[data-i]').forEach(function(c){c.onclick=function(){var t=n.tags[+c.dataset.i];batch({removeTags:[t]},'Removed “'+t+'”',[n.id]);renderTags(n)}});
   bar.querySelectorAll('.chip[data-r]').forEach(function(c){c.onclick=function(){addTagTo(n,c.dataset.r,false)}});
   $('#etags').onclick=function(){openTagPanel([n.id])};
   var inp=$('#tagIn'), sug=$('#tagSug'), items=[], k=0;
@@ -1110,7 +1155,7 @@ function renderTags(n){
     else if(e.key==='ArrowUp'){e.preventDefault();if(items.length){k=(k-1+items.length)%items.length;hi()}}
     else if(e.key==='Enter'||(e.key==='Tab'&&inp.value.trim())){e.preventDefault();pick(k)}
     else if(e.key==='Escape'){inp.value='';draw();inp.blur()}
-    else if(e.key==='Backspace'&&!inp.value&&n.tags.length){var t=n.tags[n.tags.length-1];batch({removeTags:[t]},'',[n.id]);renderTags(n);$('#tagIn').focus()}
+    else if(e.key==='Backspace'&&!inp.value&&n.tags.length){var t=n.tags[n.tags.length-1];batch({removeTags:[t]},'Removed “'+t+'”',[n.id]);renderTags(n);$('#tagIn').focus()}
   };
   inp.onblur=function(){setTimeout(function(){if(sug.isConnected){sug.classList.remove('on')}},150)};
 }
@@ -1118,7 +1163,7 @@ function addTagTo(n,t,refocus){
   t=String(t).trim(); if(!t||n.tags.indexOf(t)>=0) return;
   if(!S.parent.hasOwnProperty(t)) setTags(S.tags.concat([{name:t,parent:''}]));
   rememberTags([t]);
-  batch({addTags:[t]},'',[n.id]).then(function(){ if(!refocus) toast('Tagged “'+t+'”') });
+  batch({addTags:[t]},'Tagged “'+t+'”',[n.id]);
   renderTags(n); if(refocus&&$('#tagIn')) $('#tagIn').focus();
 }
 
