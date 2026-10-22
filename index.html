@@ -580,16 +580,17 @@ function viewCabinet(){
     var chain=[],x=C.tag,g=0; while(x&&g++<12){chain.unshift(x);x=S.parent[x]}
     var ft=(P.stats&&P.stats.ftags)||{}, phN=function(t){var n=0;descendants(t).forEach(function(x){n+=ft[x]||0});return n};   // filed photos count too
     if(!P.stats) phStats().then(function(){if(S.view==='cabinet'&&C.mode==='tag')viewCabinet()}).catch(function(){});
-    var kids=(S.children[C.tag]||[]).map(function(k){return [k,inCab(k).length,phN(k)]}).filter(function(k){return k[1]||k[2]});
+    var kids=(S.children[C.tag]||[]).map(function(k){return [k,inCab(k).length,phN(k)]}).filter(function(k){return k[1]||k[2]||S.newTags[k[0]]});
     var list=C.tag?byRecent(inCab(C.tag)):byRecent(cab), nPh=C.tag?phN(C.tag):0;
-    body='<div class="crumbs"><button class="cr" data-ct="">Cabinet</button>'+chain.map(function(c,i){return '<span class="sep">›</span>'+(i<chain.length-1?'<button class="cr" data-ct="'+esc(c)+'">'+esc(c)+'</button>':'<b>'+esc(c)+'</b>')}).join('')+' <span class="muted">('+list.length+')</span></div>'+
-      (kids.length?'<div class="subtags">'+kids.map(function(k){return '<button class="chip" data-ct="'+esc(k[0])+'">'+esc(k[0])+' <span class="muted">'+(k[1]||'')+(k[2]?(k[1]?' · ':'')+'📷'+k[2]:'')+'</span></button>'}).join('')+'</div>':'')+
+    body='<div class="crumbs"><button class="cr" data-ct="">Cabinet</button>'+chain.map(function(c,i){return '<span class="sep">›</span>'+(i<chain.length-1?'<button class="cr" data-ct="'+esc(c)+'">'+esc(c)+'</button>':'<b>'+esc(c)+'</b>')}).join('')+' <span class="muted">('+(C.tag?list.length+' note'+(list.length===1?'':'s')+(nPh?' · '+nPh+' photo'+(nPh===1?'':'s'):''):list.length)+')</span></div>'+
+      '<div class="subtags">'+kids.map(function(k){return '<button class="chip" data-ct="'+esc(k[0])+'">'+esc(k[0])+' <span class="muted">'+(k[1]||'')+(k[2]?(k[1]?' · ':'')+'📷'+k[2]:'')+'</span></button>'}).join('')+newTagChip(C.tag)+'</div>'+
       (list.length?'<div class="list">'+list.map(rowHtml).join('')+'</div>':(nPh?'':'<p class="muted">No Cabinet notes with this tag.</p>'))+
       (nPh?'<div class="lhead" style="margin-top:16px"><h2>Filed photos ('+nPh+')</h2></div><div class="phgrid" id="cabPh"><p class="muted">Loading…</p></div>':'');
   } else body='<div id="cabDrive"><p class="muted">Loading Drive folders…</p></div>';
   $('#main').innerHTML=tabs+body;
   $$('#cabTabs [data-m]').forEach(function(b){b.onclick=function(){C.mode=b.dataset.m;viewCabinet()}});
   $$('#main [data-ct]').forEach(function(b){b.onclick=function(){C.tag=b.dataset.ct;viewCabinet();window.scrollTo(0,0)}});
+  bindNewTag(viewCabinet);
   if(C.mode==='drive') drawCabDrive(cab); else bindRows();
   if($('#cabPh')) call('api_photos',{view:'filed',tag:C.tag,limit:1500}).then(function(r){var g=$('#cabPh');if(!g)return;
     r.items.forEach(function(p){P.byId[p.id]=p}); P.secs=[{k:'',n:r.items.length,items:r.items}]; P.sel={};
@@ -720,6 +721,7 @@ function viewList(o){ S.lastList=o;
   if(o.tag){ if(!S.parent.hasOwnProperty(o.tag)){go('tags');return} o.notes=tagNotes(o.tag);
     $('#main').innerHTML=tagCrumbs(o.tag).replace('</div>','<button class="btn small tshare" id="tShare">Share…</button></div>')+(o.notes.length?'<div class="list">'+o.notes.map(rowHtml).join('')+'</div>':'<p class="muted">No notes with this tag yet.</p>');
     $$('#main [data-crumb]').forEach(function(b){b.onclick=function(){var c=b.dataset.crumb;if(c)showTag(c);else go('tags')}});
+    bindNewTag(function(){viewList(o)});
     $('#tShare').onclick=function(){shareDialog(o.tag)};
   } else $('#main').innerHTML=section(esc(o.title),o.notes,o.empty);
   bindRows(); }
@@ -979,7 +981,24 @@ function tagCrumbs(t){
   return '<div class="crumbs"><button class="cr" data-crumb="">Tags</button>'+chain.map(function(c,i){
       return '<span class="sep">›</span>'+(i<chain.length-1?'<button class="cr" data-crumb="'+esc(c)+'">'+esc(c)+'</button>':'<b>'+esc(c)+'</b>')}).join('')+
     ' <span class="muted">('+tagNotes(t).length+')</span></div>'+
-    (kids.length?'<div class="subtags">'+kids.map(function(k){return '<button class="chip" data-crumb="'+esc(k)+'">'+esc(k)+' <span class="muted">'+tagCount(k)+'</span></button>'}).join('')+'</div>':'');
+    '<div class="subtags">'+kids.map(function(k){return '<button class="chip" data-crumb="'+esc(k)+'">'+esc(k)+' <span class="muted">'+tagCount(k)+'</span></button>'}).join('')+newTagChip(t)+'</div>';
+}
+/* "＋ New tag here": create a tag under the one you're looking at, right where you are. */
+S.newTags={};
+function newTagChip(parent){return '<button class="chip ghost" data-nt="'+esc(parent||'')+'" title="'+(parent?'New tag under '+esc(parent):'New top-level tag')+'">＋ New tag here</button>'}
+function bindNewTag(after){
+  $$('#main [data-nt]').forEach(function(b){b.onclick=function(){var par=b.dataset.nt;
+    var w=document.createElement('span');w.className='tagbox';w.innerHTML='<input placeholder="'+(par?'New tag under '+esc(par):'New top-level tag')+'" autocomplete="off">';
+    b.replaceWith(w); var inp=w.querySelector('input'); inp.focus();
+    inp.onkeydown=function(e){e.stopPropagation();
+      if(e.key==='Escape'){after();return}
+      if(e.key!=='Enter')return; e.preventDefault(); var nm=inp.value.trim(); if(!nm)return;
+      var ex=S.tags.filter(function(t){return t.name.toLowerCase()===nm.toLowerCase()})[0];
+      if(ex){toast('“'+ex.name+'” already exists'+(ex.parent?' under '+ex.parent:''));inp.select();return}
+      inp.disabled=true;
+      call('api_createTag',nm,par).then(function(){S.tags.push({name:nm,parent:par});setTags(S.tags);S.newTags[nm]=1;toast('Created “'+nm+'”'+(par?' under '+par:''));after()}).catch(function(){inp.disabled=false})};
+    inp.onblur=function(){setTimeout(function(){if(!inp.disabled&&!inp.value.trim()&&w.isConnected)after()},200)};
+  }});
 }
 function tagMenu(t,anchor){
   closeMenu();
@@ -1450,9 +1469,9 @@ function phTop(){
   if(P.tab==='tag'){
     if(P.tag&&!S.parent.hasOwnProperty(P.tag)) P.tag='';
     var chain=[],x=P.tag,g=0; while(x&&g++<12){chain.unshift(x);x=S.parent[x]}
-    var kids=(S.children[P.tag]||[]).map(function(k){return [k,phTagCount(k)]}).filter(function(k){return k[1]});
+    var kids=(S.children[P.tag]||[]).map(function(k){return [k,phTagCount(k)]}).filter(function(k){return k[1]||S.newTags[k[0]]});
     h+='<div class="crumbs"><button class="cr" data-pt="">Tags</button>'+chain.map(function(c,i){return '<span class="sep">›</span>'+(i<chain.length-1?'<button class="cr" data-pt="'+esc(c)+'">'+esc(c)+'</button>':'<b>'+esc(c)+'</b>')}).join('')+'</div>'+
-      (kids.length?'<div class="subtags">'+kids.map(function(k){return '<button class="chip" data-pt="'+esc(k[0])+'">'+esc(k[0])+' <span class="muted">'+k[1]+'</span></button>'}).join('')+'</div>':(P.tag?'':'<p class="muted">No tagged photos yet. Select photos in the Inbox and type a tag.</p>'));
+      '<div class="subtags">'+kids.map(function(k){return '<button class="chip" data-pt="'+esc(k[0])+'">'+esc(k[0])+' <span class="muted">'+k[1]+'</span></button>'}).join('')+newTagChip(P.tag)+'</div>'+(kids.length||P.tag?'':'<p class="muted">No tagged photos yet. Select photos in the Inbox and type a tag.</p>');
   } else if(P.tab==='folder'){
     var fc=st.folders||{}, pre=P.folder?P.folder+'/':'', sub={};
     Object.keys(fc).forEach(function(f){ if(P.folder&&f!==P.folder&&f.indexOf(pre)!==0) return; var rest=P.folder?f.slice(pre.length):f; if(!rest) return; var k=rest.split('/')[0]; sub[k]=(sub[k]||0)+fc[f]});
@@ -1464,6 +1483,7 @@ function phTop(){
   $('#phTop').innerHTML=h;
   $$('#phTabs [data-t]').forEach(function(b){b.onclick=function(){P.tab=b.dataset.t;viewPhotos()}});
   $$('#phTop [data-pt]').forEach(function(b){b.onclick=function(){P.tag=b.dataset.pt;viewPhotos()}});
+  bindNewTag(function(){phTop()});
   $$('#phTop [data-pf]').forEach(function(b){b.onclick=function(){P.folder=b.dataset.pf;viewPhotos()}});
 }
 /* ----- timeline ----- */
