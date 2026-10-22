@@ -57,6 +57,16 @@ Open a tag and choose **Share…** (or ⋯ → Share… on the Tags page). Type 
 - Renaming the tag keeps its links working. Deleting the tag switches its links off.
 - A share link only reaches the notes in that tag. It can't change anything or see the rest of your notes.
 
+## Photos
+
+ArNote can show photos from a Drive folder without copying them. Put photos in **ArNote Photos** in your Drive (sub-folders are fine). The **Photos** section then shows:
+
+- a photo inbox to tag and file from
+- browsing by tag, by date (year → month) or by folder
+- a full-screen viewer with swipe or arrow keys
+
+Only tags and inbox/filed status are stored in ArNote's Sheet. New photos are picked up every 15 minutes, or press **Check for new**. To bring in an existing library, export it with Google Takeout and copy the folders into ArNote Photos. To add new phone photos automatically, use a sync app (for example Autosync for Google Drive on Android) pointed at that folder.
+
 ## Printing
 
 Select notes and choose **🖨 Print** (or Print on a single note). Google Docs are combined into one PDF; other files come as their own PDFs.

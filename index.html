@@ -59,7 +59,7 @@ button.chip{cursor:pointer}
 .bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0}
 iframe{width:100%;height:75vh;border:1px solid var(--line);border-radius:10px;background:#fff}
 .atts a{display:inline-block;margin:3px 8px 3px 0;font-size:13px;color:var(--acc)}
-.toast{position:fixed;bottom:84px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:50}
+.toast{position:fixed;bottom:84px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:80}
 .toast.on{opacity:.95}
 .toast.undo{pointer-events:auto;display:flex;gap:14px;align-items:center}
 .toast .ub{background:none;border:0;color:#8fe0b4;font-weight:700;cursor:pointer;padding:2px 4px;font-size:14px;text-transform:uppercase;letter-spacing:.4px}
@@ -90,7 +90,7 @@ textarea,.field{width:100%;padding:9px 12px;border:1px solid var(--line);border-
 .trow.newrow{background:var(--acc2)}.trow.newrow .field{flex:1;min-width:0;padding:5px 8px;margin:0}
 .ptop{border:1px dashed var(--acc);background:none;color:var(--acc);border-radius:8px;padding:5px 10px;cursor:pointer;font:inherit;font-size:13px;margin:6px 10px}
 /* modal */
-.shade{position:fixed;inset:0;background:var(--shade);z-index:30;display:flex;align-items:center;justify-content:center;padding:16px}
+.shade{position:fixed;inset:0;background:var(--shade);z-index:65;display:flex;align-items:center;justify-content:center;padding:16px}
 .modal{background:var(--card);color:var(--ink);border-radius:14px;width:100%;max-width:520px;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.3)}
 .modal .mh{padding:14px 16px 8px;font-weight:700}
 .modal .mh small{display:block;font-weight:400;color:var(--mute);margin-top:2px}
@@ -98,6 +98,24 @@ textarea,.field{width:100%;padding:9px 12px;border:1px solid var(--line);border-
 .modal .mf{padding:10px 16px 14px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;align-items:center}
 .modal .mf .grow{flex:1;color:var(--mute);font-size:13px}
 .modal .tree{border:0;padding:0}
+.phgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin-top:8px}
+@media (max-width:600px){.phgrid{grid-template-columns:repeat(3,1fr);gap:3px}}
+.ph{position:relative;aspect-ratio:1;background:var(--line);border-radius:8px;overflow:hidden;cursor:pointer}
+.ph img{width:100%;height:100%;object-fit:cover;display:block}
+.ph .pcb{position:absolute;top:6px;left:6px;width:22px;height:22px;accent-color:var(--acc);opacity:.85}
+.ph.sel{outline:3px solid var(--acc);outline-offset:-3px}.ph.sel img{opacity:.8}
+.ph .pv{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.55);color:#fff;border-radius:6px;font-size:12px;padding:1px 6px}
+.ph .pt{position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.55);color:#fff;border-radius:6px;font-size:11px;padding:1px 6px;max-width:80%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.phbar{position:sticky;top:0;z-index:4;background:var(--bg);padding:8px 0;display:flex;gap:6px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--line)}
+.phv{position:fixed;inset:0;z-index:60;background:rgba(10,10,12,.94);display:flex;flex-direction:column;color:#eee}
+.phv .top{display:flex;gap:8px;align-items:center;padding:10px 14px;flex-wrap:wrap}.phv .top .grow{flex:1}
+.phv .img{flex:1;display:flex;align-items:center;justify-content:center;min-height:0;position:relative}
+.phv .img img{max-width:100%;max-height:100%;object-fit:contain}
+.phv .nav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.12);border:0;color:#fff;font-size:28px;width:46px;height:64px;border-radius:10px;cursor:pointer}
+.phv .nav.l{left:10px}.phv .nav.r{right:10px}
+.phv .bot{padding:10px 14px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.phv .btn{background:rgba(255,255,255,.1);color:#eee;border-color:rgba(255,255,255,.2)}.phv .btn.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+.phv .chip{background:rgba(255,255,255,.15);color:#fff}
 .loc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:7px 10px;margin:6px 0;font-size:13px;line-height:1.6}
 .loc .acct{font-weight:600}.loc a{color:var(--acc);text-decoration:none}.loc a:hover{text-decoration:underline}.loc .sep{color:var(--mute);margin:0 3px}
 .pp .pptree{max-height:min(46vh,340px);overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:6px}
@@ -233,6 +251,7 @@ body.guest #actbar,body.guest .row .nb{display:none!important}
   <button data-v="shortcuts"><svg viewBox="0 0 24 24"><path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/></svg><span>Shortcuts</span></button>
   <button data-v="inbox"><svg viewBox="0 0 24 24"><path d="M3 13l3-8h12l3 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 13h5l1 3h6l1-3h5"/></svg><span>Inbox <span id="inboxN"></span></span></button>
   <button data-v="cabinet"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/></svg><span>Cabinet</span></button>
+  <button data-v="photos"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="15" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-8 8"/></svg><span>Photos</span></button>
   <button data-v="all"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M9 12h7M9 16h7M9 8h3"/></svg><span>All notes</span></button>
   <button data-v="tags"><svg viewBox="0 0 24 24"><path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z"/><circle cx="8" cy="8" r="1.5"/></svg><span>Tags</span></button>
   <button data-v="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>Settings</span></button>
@@ -382,7 +401,7 @@ function go(v,arg){
   if(v!==S.view||v==='note'||v==='new') S.sel={};
   S.view=v; $('#main').classList.remove('wide'); $$('#nav button').forEach(function(b){b.classList.toggle('on',b.dataset.v===v)});
   window.scrollTo(0,0);
-  ({home:viewHome,inbox:viewInbox,tags:viewTags,all:viewAll,new:viewNew,note:viewNote,list:viewList,shortcuts:viewShortcuts,cabinet:viewCabinet,settings:viewSettings}[v])(arg);
+  ({home:viewHome,inbox:viewInbox,tags:viewTags,all:viewAll,new:viewNew,note:viewNote,list:viewList,shortcuts:viewShortcuts,cabinet:viewCabinet,settings:viewSettings,photos:viewPhotos}[v])(arg);
 }
 $$('#nav button').forEach(function(b){b.onclick=function(){go(b.dataset.v)}});
 function rerender(){ var v=S.view; if(v==='inbox'&&isSplit()&&$('#pv')){refreshSplit();return} if(v==='list'&&S.lastList) viewList(S.lastList); else if(v==='list') runSearch(); else if(v!=='note') go(v) }
@@ -1028,13 +1047,14 @@ function tagDialog(kind,t){
 }
 
 /* ---------- Tag panel: pick tags for one or many notes ---------- */
-function openTagPanel(ids,onDone,why,prefill){
-  ids=ids.filter(function(id){return S.byId[id]}); if(!ids.length) return;
-  var have={}; ids.forEach(function(id){S.byId[id].tags.forEach(function(t){have[t]=(have[t]||0)+1})});
+function openTagPanel(ids,onDone,why,prefill,ext){
+  var src=ext?ext.items:S.byId, noun=ext?ext.noun:'notes';
+  ids=ids.filter(function(id){return src[id]}); if(!ids.length) return;
+  var have={}; ids.forEach(function(id){src[id].tags.forEach(function(t){have[t]=(have[t]||0)+1})});
   var N=ids.length, orig={}, state={}, addUnder=null;   // addUnder: tag name to add a sub-tag under, '' = top level, null = closed   // state: 1 = on for all, 0 = off for all, 0.5 = mixed (unchanged)
   Object.keys(have).forEach(function(t){orig[t]=state[t]=have[t]===N?1:0.5});
   var po={}; Object.keys(have).forEach(function(t){var x=S.parent[t];while(x){po[x]=1;x=S.parent[x]}});
-  var title=N===1?'Tags':'Tags for '+N+' notes', sub=N===1?esc(S.byId[ids[0]].title):'Click a tag to add it to all; click again to remove it from all.';
+  var title=N===1?'Tags':'Tags for '+N+' '+noun, sub=N===1?esc(src[ids[0]].title):'Click a tag to add it to all; click again to remove it from all.';
   if(why) sub='<b style="color:var(--warn)">'+esc(why)+'</b><br>'+sub;
   modal(title,sub,
     '<input class="field" id="pq" placeholder="Search or create a tag…" autocomplete="off" style="margin-bottom:6px"><div id="pbody"></div>',
@@ -1097,6 +1117,7 @@ function openTagPanel(ids,onDone,why,prefill){
   q.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();var first=$('#pbody .trow[data-tag]');if(first&&q.value.trim()){toggle(first.dataset.tag);q.select()}else if($('#pnew'))createNew();else $('#pa').click()}};
   $('#pc').onclick=closeModal;
   $('#pa').onclick=function(){var d=diff();closeModal();rememberTags(d.add);
+    if(ext){ext.apply(d);return}
     batch({addTags:d.add,removeTags:d.rem},'Tags updated',ids).then(function(){if(onDone)onDone();else if(S.view==='note')viewNote(ids[0],true)});
     if(S.view==='note'&&!onDone) viewNote(ids[0],true); if(onDone) toast('Saving tags…');};
   draw();
@@ -1371,6 +1392,152 @@ function openB64(b64,mime,name){
   var url=URL.createObjectURL(new Blob([u8],{type:mime||'application/octet-stream'}));
   if(/^(image\/|application\/pdf|text\/)/.test(mime||'')) window.open(url,'_blank');
   else {var a=document.createElement('a');a.href=url;a.download=name||'file';document.body.appendChild(a);a.click();a.remove()}
+}
+
+
+/* ---------- Photos: photos stay in Drive (ArNote Photos folder); ArNote keeps tags and inbox/filed ---------- */
+var P={tab:'inbox',tag:'',year:'',month:'',folder:'',items:[],total:0,sel:{},stats:null,thumbs:{},byId:{},loading:false,q:0};
+var MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function phStats(force){
+  if(P.stats&&!force&&Date.now()-P.stats._t<60000) return Promise.resolve(P.stats);
+  return call('api_photoStats').then(function(st){st._t=Date.now();P.stats=st;return st});
+}
+function phTagCount(t){var st=P.stats||{tags:{}},n=0;descendants(t).forEach(function(x){n+=st.tags[x]||0});return n}
+function viewPhotos(){
+  P.sel={}; $('#main').classList.add('wide');
+  $('#main').innerHTML='<div class="lhead"><h2>Photos</h2><span class="muted" id="phSync" style="font-size:12px"></span><button class="btn small" id="phNow">Check for new</button></div><div id="phTop"><p class="muted">Loading…</p></div><div id="phBar"></div><div class="phgrid" id="phGrid"></div><div id="phMore"></div>';
+  $('#phNow').onclick=function(){var b=this;b.disabled=true;b.textContent='Checking…';
+    call('api_photoSyncNow').then(function(r){toast(r.added?r.added+' new photo'+(r.added>1?'s':''):'No new photos'+(r.complete?'':' yet (still reading folders)'));return phStats(true)}).then(function(){viewPhotos()}).catch(function(){b.disabled=false;b.textContent='Check for new'})};
+  phStats().then(function(st){ if(S.view!=='photos') return;
+    var sy=st.sync||{}; $('#phSync').textContent=sy.at?'Last checked '+new Date(sy.at).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+    if(!st.total){
+      $('#phTop').innerHTML='<div class="wg" style="margin-top:10px"><p style="margin-top:0"><b>No photos yet.</b> ArNote shows the photos in your Drive folder <a href="'+esc(st.rootUrl)+'" target="_blank" style="color:var(--acc)">ArNote Photos</a> (and every folder inside it). They stay there; ArNote just keeps your tags.</p>'+
+        '<ul class="muted" style="font-size:14px;margin:0;padding-left:18px"><li><b>Your existing photos:</b> export them with Google Takeout and copy the folders into ArNote Photos.</li><li><b>New phone photos:</b> a sync app (Autosync for Google Drive or FolderSync on Android) copying your camera folder to ArNote Photos/Phone.</li><li>New photos are picked up every 15 minutes, or press <b>Check for new</b>.</li></ul></div>';
+      return }
+    var tabs=[['inbox','Inbox',st.inbox],['filed','Filed',st.filed],['all','All',st.total],['tag','By tag'],['date','By date'],['folder','By folder']];
+    var h='<div class="tabs" id="phTabs" style="margin:10px 0 4px">'+tabs.map(function(t){return '<button data-t="'+t[0]+'"'+(P.tab===t[0]?' class="on"':'')+'>'+t[1]+(t[2]!=null?' <span class="muted">'+t[2]+'</span>':'')+'</button>'}).join('')+'</div>';
+    if(P.tab==='tag'){
+      if(P.tag&&!S.parent.hasOwnProperty(P.tag)) P.tag='';
+      var chain=[],x=P.tag,g=0; while(x&&g++<12){chain.unshift(x);x=S.parent[x]}
+      var kids=(S.children[P.tag]||[]).map(function(k){return [k,phTagCount(k)]}).filter(function(k){return k[1]});
+      h+='<div class="crumbs"><button class="cr" data-pt="">Tags</button>'+chain.map(function(c,i){return '<span class="sep">›</span>'+(i<chain.length-1?'<button class="cr" data-pt="'+esc(c)+'">'+esc(c)+'</button>':'<b>'+esc(c)+'</b>')}).join('')+'</div>'+
+        (kids.length?'<div class="subtags">'+kids.map(function(k){return '<button class="chip" data-pt="'+esc(k[0])+'">'+esc(k[0])+' <span class="muted">'+k[1]+'</span></button>'}).join('')+'</div>':(P.tag?'':'<p class="muted">No tagged photos yet.</p>'));
+    } else if(P.tab==='date'){
+      var ys=Object.keys(st.years).sort().reverse(), cnt=function(y){return Object.keys(st.years[y]).reduce(function(a,m){return a+st.years[y][m]},0)};
+      h+='<div class="crumbs"><button class="cr" data-py="">All years</button>'+(P.year?'<span class="sep">›</span>'+(P.month?'<button class="cr" data-py="'+P.year+'">'+P.year+'</button><span class="sep">›</span><b>'+MONTHS[+P.month-1]+'</b>':'<b>'+P.year+'</b>'):'')+'</div>';
+      if(!P.year) h+='<div class="subtags">'+ys.map(function(y){return '<button class="chip" data-py="'+y+'">'+(y==='?'?'No date':y)+' <span class="muted">'+cnt(y)+'</span></button>'}).join('')+'</div>';
+      else if(!P.month&&st.years[P.year]) h+='<div class="subtags">'+Object.keys(st.years[P.year]).sort().map(function(m){return '<button class="chip" data-pm="'+m+'">'+(MONTHS[+m-1]||m)+' <span class="muted">'+st.years[P.year][m]+'</span></button>'}).join('')+'</div>';
+    }
+    else if(P.tab==='folder'){
+      var fc=st.folders||{}, pre=P.folder?P.folder+'/':'', sub={};
+      Object.keys(fc).forEach(function(f){ if(P.folder&&f!==P.folder&&f.indexOf(pre)!==0) return; var rest=P.folder?f.slice(pre.length):f; if(!rest) return; var k=rest.split('/')[0]; sub[k]=(sub[k]||0)+fc[f]});
+      var segs=P.folder?P.folder.split('/'):[];
+      h+='<div class="crumbs"><button class="cr" data-pf="">ArNote Photos</button>'+segs.map(function(sg,i){var path=segs.slice(0,i+1).join('/');return '<span class="sep">›</span>'+(i<segs.length-1?'<button class="cr" data-pf="'+esc(path)+'">'+esc(sg)+'</button>':'<b>'+esc(sg)+'</b>')}).join('')+
+        ' <a href="'+esc(st.rootUrl)+'" target="_blank" class="muted" style="font-size:12px;margin-left:8px">open in Drive ↗</a></div>'+
+        (Object.keys(sub).length?'<div class="subtags">'+Object.keys(sub).sort(function(a,b){return a.localeCompare(b,undefined,{numeric:true})}).map(function(k){return '<button class="chip" data-pf="'+esc(pre+k)+'">📁 '+esc(k)+' <span class="muted">'+sub[k]+'</span></button>'}).join('')+'</div>':'');
+    }
+    $('#phTop').innerHTML=h;
+    $$('#phTop [data-pf]').forEach(function(b){b.onclick=function(){P.folder=b.dataset.pf;viewPhotos()}});
+    $$('#phTabs [data-t]').forEach(function(b){b.onclick=function(){P.tab=b.dataset.t;viewPhotos()}});
+    $$('#phTop [data-pt]').forEach(function(b){b.onclick=function(){P.tag=b.dataset.pt;viewPhotos()}});
+    $$('#phTop [data-py]').forEach(function(b){b.onclick=function(){P.year=b.dataset.py;P.month='';viewPhotos()}});
+    $$('#phTop [data-pm]').forEach(function(b){b.onclick=function(){P.month=b.dataset.pm;viewPhotos()}});
+    var show=!(P.tab==='tag'&&!P.tag)&&!(P.tab==='date'&&!P.year);
+    if(show) phLoad(true); else {$('#phGrid').innerHTML='';$('#phMore').innerHTML='';phPaint()}
+  }).catch(function(){$('#phTop').innerHTML='<p class="muted">Could not load photos.</p>'});
+}
+function phQuery(off){return {view:P.tab==='inbox'?'inbox':P.tab==='filed'?'filed':'all',tag:P.tab==='tag'?P.tag:'',year:P.tab==='date'?(P.year==='?'?'':P.year):'',month:P.tab==='date'?P.month:'',folder:P.tab==='folder'?P.folder:'',offset:off,limit:120}}
+function phLoad(reset){
+  if(reset){P.items=[];P.total=0;P.q++}
+  var q=P.q; P.loading=true; $('#phMore').innerHTML='<p class="muted" style="text-align:center">Loading…</p>';
+  call('api_photos',phQuery(P.items.length)).then(function(r){ if(q!==P.q||S.view!=='photos') return; P.loading=false;
+    P.total=r.total; r.items.forEach(function(p){P.byId[p.id]=p}); var start=P.items.length; P.items=P.items.concat(r.items);
+    var g=$('#phGrid'); if(reset) g.innerHTML='';
+    g.insertAdjacentHTML('beforeend',r.items.map(phCell).join(''));
+    phBind(); phThumbs(r.items.map(function(p){return p.id}));
+    $('#phMore').innerHTML=P.items.length<P.total?'<div style="text-align:center;margin:14px"><button class="btn" id="phNext">Show more ('+(P.total-P.items.length)+' left)</button></div>':(P.total?'':'<p class="muted">'+(P.tab==='inbox'?'Photo inbox is empty. Nice.':'Nothing here.')+'</p>');
+    if($('#phNext')){ $('#phNext').onclick=function(){phLoad(false)};
+      if('IntersectionObserver' in window){var io=new IntersectionObserver(function(e){if(e[0].isIntersecting&&!P.loading){io.disconnect();phLoad(false)}});io.observe($('#phNext'))} }
+    phPaint();
+  }).catch(function(){P.loading=false;$('#phMore').innerHTML='<p class="muted">Could not load photos.</p>'});
+}
+function phCell(p){var t=P.thumbs[p.id];
+  return '<div class="ph'+(P.sel[p.id]?' sel':'')+'" data-id="'+esc(p.id)+'">'+(t?'<img src="'+t+'" alt="">':'<img alt="" loading="lazy">')+
+    '<input type="checkbox" class="pcb"'+(P.sel[p.id]?' checked':'')+' aria-label="Select">'+(/^video/.test(p.mime)?'<span class="pv">▶</span>':'')+
+    (p.tags.length?'<span class="pt">'+esc(p.tags.join(', '))+'</span>':'')+'</div>'}
+function phThumbs(ids){
+  ids=ids.filter(function(id){return !P.thumbs[id]});
+  var chunks=[];for(var i=0;i<ids.length;i+=30)chunks.push(ids.slice(i,i+30));
+  function run(){var c=chunks.shift();if(!c||S.view!=='photos')return Promise.resolve();
+    return call('api_photoThumbs',c).then(function(m){Object.keys(m).forEach(function(id){P.thumbs[id]=m[id];var el=document.querySelector('.ph[data-id="'+id+'"] img');if(el)el.src=m[id]})}).catch(function(){}).then(run)}
+  run(); run();   // two at a time
+}
+function phBind(){
+  $$('#phGrid .ph').forEach(function(c){ if(c._b) return; c._b=1;
+    c.onclick=function(e){var id=c.dataset.id;
+      if(e.target.classList.contains('pcb')||Object.keys(P.sel).length){ if(!e.target.classList.contains('pcb')) e.preventDefault(); if(P.sel[id])delete P.sel[id];else P.sel[id]=1; phPaint(); return }
+      phViewer(id)}});
+}
+function phPaint(){
+  var n=Object.keys(P.sel).length;
+  $$('#phGrid .ph').forEach(function(c){var on=!!P.sel[c.dataset.id];c.classList.toggle('sel',on);var cb=c.querySelector('.pcb');if(cb)cb.checked=on});
+  var bar=$('#phBar'); if(!bar) return;
+  bar.innerHTML=n?'<div class="phbar"><b>'+n+' selected</b><button class="btn small primary" id="pbTag">Tags…</button><button class="btn small" id="pbFile">File</button><button class="btn small" id="pbIn">Back to inbox</button>'+
+    '<button class="btn small" id="pbAll">Select all shown</button><button class="btn small" id="pbClr">Clear</button></div>':(P.items.length?'<div class="muted" style="font-size:12px;margin-top:4px">'+P.total+' photo'+(P.total===1?'':'s')+' · tap the box on a photo to select several</div>':'');
+  if(!n) return;
+  var ids=Object.keys(P.sel);
+  $('#pbTag').onclick=function(){phTag(ids)};
+  $('#pbFile').onclick=function(){phUpdate(ids,{status:'filed'},'Filed')};
+  $('#pbIn').onclick=function(){phUpdate(ids,{status:''},'Moved to photo inbox')};
+  $('#pbAll').onclick=function(){P.items.forEach(function(p){P.sel[p.id]=1});phPaint()};
+  $('#pbClr').onclick=function(){P.sel={};phPaint()};
+}
+function phTag(ids,after){
+  var items={}; ids.forEach(function(id){var p=P.byId[id];if(p)items[id]={tags:p.tags,title:p.name}});
+  openTagPanel(ids,null,null,null,{items:items,noun:'photos',apply:function(d){if(!d.add.length&&!d.rem.length)return;phUpdate(ids,{addTags:d.add,removeTags:d.rem},'Tags updated',after)}});
+}
+/** Change photos (tags, filed/inbox), with Undo. */
+function phUpdate(ids,ch,msg,after){
+  var before={}; ids.forEach(function(id){var p=P.byId[id];if(p)before[id]={tags:p.tags.slice(),status:p.status}});
+  function local(id,c){var p=P.byId[id];if(!p)return;(c.removeTags||[]).forEach(function(t){p.tags=p.tags.filter(function(g){return g!==t})});(c.addTags||[]).forEach(function(t){if(p.tags.indexOf(t)<0)p.tags.push(t)});if(c.status!==undefined)p.status=c.status}
+  ids.forEach(function(id){local(id,ch)});
+  (ch.addTags||[]).forEach(function(t){if(!S.parent.hasOwnProperty(t))setTags(S.tags.concat([{name:t,parent:''}]))});
+  var pr=call('api_photoUpdate',ids,ch); P.sel={}; if(P.stats)P.stats._t=0;
+  var refresh=function(){if(after)after();else if(S.view==='photos')phStats(true).then(function(){viewPhotos()})};
+  pr.then(refresh);
+  undoToast(msg+(ids.length>1?' ('+ids.length+')':''),function(){return pr.then(function(){
+    var groups={};Object.keys(before).forEach(function(id){var p=P.byId[id],b=before[id];if(!p)return;
+      var c={addTags:b.tags.filter(function(t){return p.tags.indexOf(t)<0}),removeTags:p.tags.filter(function(t){return b.tags.indexOf(t)<0})};
+      if(p.status!==b.status)c.status=b.status;var k=JSON.stringify(c);(groups[k]=groups[k]||[]).push(id)});
+    return Promise.all(Object.keys(groups).map(function(k){var c=JSON.parse(k);groups[k].forEach(function(id){var p=P.byId[id];p.tags=before[id].tags.slice();p.status=before[id].status});return call('api_photoUpdate',groups[k],c)}));
+  }).then(refresh)});
+}
+/** Full-screen viewer with arrows (← → keys), tags, file, open in Drive. */
+function phViewer(id){
+  var old=$('#phv'); if(old) old.remove();
+  var p=P.byId[id]; if(!p) return; var i=P.items.findIndex(function(x){return x.id===id});
+  var v=document.createElement('div'); v.className='phv'; v.id='phv';
+  var d=p.taken?new Date(p.taken):null;
+  v.innerHTML='<div class="top"><b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:55vw">'+esc(p.name)+'</b><span style="opacity:.7;font-size:13px">'+(d&&!isNaN(d)?d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):'')+(p.folder?' · '+esc(p.folder):'')+'</span><span class="grow"></span><button class="btn small" id="pvX">✕ Close</button></div>'+
+    '<div class="img">'+(P.thumbs[id]?'<img id="pvImg" src="'+P.thumbs[id]+'" style="filter:blur(2px)">':'<img id="pvImg" alt="">')+(i>0?'<button class="nav l" id="pvL">‹</button>':'')+(i<P.items.length-1?'<button class="nav r" id="pvR">›</button>':'')+'</div>'+
+    '<div class="bot"><span id="pvTags">'+p.tags.map(function(t){return '<span class="chip">'+esc(t)+'</span>'}).join(' ')+'</span><button class="btn small primary" id="pvTag">Tags…</button>'+
+    (p.status==='filed'?'<button class="btn small" id="pvIn">Back to inbox</button>':'<button class="btn small" id="pvFile">File</button>')+'<a class="btn small" id="pvOpen" target="_blank" style="display:none">Open in Drive ↗</a><span id="pvInfo" style="opacity:.7;font-size:12px"></span></div>';
+  document.body.appendChild(v);
+  function close(){v.remove();document.removeEventListener('keydown',key)}
+  function go2(j){if(j<0||j>=P.items.length)return;close();phViewer(P.items[j].id);if(j>=P.items.length-6&&P.items.length<P.total&&!P.loading)phLoad(false)}
+  function key(e){if(e.key==='Escape')close();else if(e.key==='ArrowLeft')go2(i-1);else if(e.key==='ArrowRight')go2(i+1)}
+  document.addEventListener('keydown',key);
+  $('#pvX').onclick=close; if($('#pvL'))$('#pvL').onclick=function(){go2(i-1)}; if($('#pvR'))$('#pvR').onclick=function(){go2(i+1)};
+  var sx=null; v.addEventListener('touchstart',function(e){sx=e.touches[0].clientX},{passive:true});
+  v.addEventListener('touchend',function(e){if(sx==null)return;var dx=e.changedTouches[0].clientX-sx;sx=null;if(Math.abs(dx)>60)go2(dx<0?i+1:i-1)});
+  $('#pvTag').onclick=function(){phTag([id],function(){var o=$('#phv');if(o){$('#pvTags').innerHTML=P.byId[id].tags.map(function(t){return '<span class="chip">'+esc(t)+'</span>'}).join(' ')}})};
+  if($('#pvFile'))$('#pvFile').onclick=function(){phUpdate([id],{status:'filed'},'Filed',function(){});go2(i+1<P.items.length?i+1:i-1)};
+  if($('#pvIn'))$('#pvIn').onclick=function(){phUpdate([id],{status:''},'Moved to photo inbox',function(){});close()};
+  call('api_photoView',id).then(function(r){ if(!$('#phv')||!document.body.contains(v)) return;
+    var im=$('#pvImg'); if(r.src){im.src=r.src;im.style.filter=''}
+    $('#pvOpen').href=r.url; $('#pvOpen').style.display=''; if(r.video) $('#pvOpen').textContent='▶ Play in Drive ↗';
+    $('#pvInfo').textContent=[r.camera,r.location?'📍 '+(+r.location.latitude).toFixed(4)+', '+(+r.location.longitude).toFixed(4):''].filter(Boolean).join(' · ');
+  }).catch(function(){});
 }
 
 /* ---------- pairing ---------- */

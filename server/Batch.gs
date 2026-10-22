@@ -205,6 +205,7 @@ function processDrop() {
       try { var r = noteFromFolder_(d); if (r) made.push(r); } catch (e) { Logger.log('Drop failed for folder ' + d.getName() + ': ' + e); }
     }
     try { made = made.concat(processLinks_(start)); } catch (e) { Logger.log('Links: ' + e); }
+    try { syncPhotos_(Date.now() - 60000); } catch (e) { Logger.log('Photos: ' + e); }
   } finally { lock.releaseLock(); }
   try { flushHeaders_(5000); } catch (e) {}
   return made;
@@ -747,6 +748,7 @@ function api_accounts() {
 
 /** Keep account tags and share links pointing at the right tag after a rename / delete. */
 function tagRenamed_(oldName, newName) {
+  retagPhotos_(function (tg) { var out = []; tg.forEach(function (g) { g = g === oldName ? newName : g; if (out.indexOf(g) < 0) out.push(g); }); return out; });
   var m = accountMap_(), ch = false;
   Object.keys(m).forEach(function (e) { if (m[e] === oldName) { m[e] = newName; ch = true; } });
   if (ch) saveAccountMap_(m);
@@ -755,6 +757,7 @@ function tagRenamed_(oldName, newName) {
   if (ch2) saveShares_(s);
 }
 function tagDeleted_(name) {
+  retagPhotos_(function (tg) { return tg.filter(function (g) { return g !== name; }); });
   var m = accountMap_(), ch = false;
   Object.keys(m).forEach(function (e) { if (m[e] === name) { m[e] = ''; ch = true; } });   // stop tagging that account
   if (ch) saveAccountMap_(m);
@@ -908,4 +911,195 @@ function api_linkTree() {
   var out = {};
   notes.forEach(function (n) { out[n.id] = files[n.docId]; });
   return { root: root || '', me: Session.getEffectiveUser().getEmail(), notes: out, folders: folders };
+}
+
+/* ---------------- Photos ----------------
+ * Photos stay where they are in Drive (the "ArNote Photos" folder and everything under it). ArNote keeps only an index
+ * in the Photos sheet: tags, inbox/filed, and when each photo was taken. Nothing is copied.
+ */
+var PHOTO_COLS = ['fileId', 'name', 'taken', 'mime', 'folder', 'tags', 'status', 'added', 'w', 'h'];
+
+function photoSheet_() {
+  var sh = ensureSheet_('Photos', PHOTO_COLS);
+  if (!props_().getProperty('photoFmt')) { sh.getRange('A:G').setNumberFormat('@'); props_().setProperty('photoFmt', '1'); }   // keep dates/ids as plain text
+  return sh;
+}
+
+function photoRoot_() {
+  var p = props_(), id = p.getProperty('photoRootId');
+  if (id) { try { var f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) {} }
+  var it = DriveApp.getRootFolder().getFoldersByName('ArNote Photos');
+  var folder = it.hasNext() ? it.next() : DriveApp.getRootFolder().createFolder('ArNote Photos');
+  p.setProperty('photoRootId', folder.getId());
+  return folder;
+}
+
+/** "2019:07:04 12:34:56" (camera) → ISO; otherwise a date in the file name (IMG_20190704_123456, PXL_…, 2019-07-04 …). */
+function photoTaken_(f) {
+  var t = f.imageMediaMetadata && f.imageMediaMetadata.time;
+  var m = t && String(t).match(/^(\d{4}):(\d\d):(\d\d)[ T](\d\d):(\d\d):(\d\d)/);
+  if (m && +m[1] > 1980) return m[1] + '-' + m[2] + '-' + m[3] + 'T' + m[4] + ':' + m[5] + ':' + m[6];
+  m = String(f.name).match(/(19[89]\d|20\d\d)[-_.]?(0[1-9]|1[0-2])[-_.]?(0[1-9]|[12]\d|3[01])(?:[-_ T.]?([01]\d|2[0-3])[-_.:]?([0-5]\d)[-_.:]?([0-5]\d))?/);
+  if (m) return m[1] + '-' + m[2] + '-' + m[3] + 'T' + (m[4] || '12') + ':' + (m[5] || '00') + ':' + (m[6] || '00');
+  return String(f.createdTime || '').slice(0, 19);
+}
+
+/** Find new photos/videos under ArNote Photos (all sub-folders) and add them to the index; drop ones that were deleted. */
+function syncPhotos_(start) {
+  start = start || Date.now();
+  var root = photoRoot_().getId(), sh = photoSheet_();
+  var vals = sh.getDataRange().getValues(); vals.shift();
+  var known = {}; vals.forEach(function (r, i) { known[r[0]] = i; });
+  var seen = {}, add = [], queue = [{ id: root, path: '' }], complete = true, now = new Date().toISOString();
+  while (queue.length) {
+    if (Date.now() - start > 240000) { complete = false; break; }
+    var dir = queue.shift(), token = '';
+    do {
+      var res = driveApi_('files?pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true&q=' +
+        encodeURIComponent("'" + dir.id + "' in parents and trashed = false") +
+        '&fields=' + encodeURIComponent('nextPageToken,files(id,name,mimeType,createdTime,imageMediaMetadata(time,width,height),videoMediaMetadata(width,height))') +
+        (token ? '&pageToken=' + token : ''));
+      (res.files || []).forEach(function (f) {
+        if (f.mimeType === 'application/vnd.google-apps.folder') { queue.push({ id: f.id, path: dir.path ? dir.path + '/' + f.name : f.name }); return; }
+        if (!/^(image|video)\//.test(f.mimeType)) return;          // skip Takeout .json sidecars and anything else
+        seen[f.id] = 1;
+        if (known[f.id] !== undefined) return;
+        var md = f.imageMediaMetadata || f.videoMediaMetadata || {};
+        add.push([f.id, f.name, photoTaken_(f), f.mimeType, dir.path, '', '', now, md.width || '', md.height || '']);
+        known[f.id] = -1;
+      });
+      token = res.nextPageToken || '';
+    } while (token && Date.now() - start < 240000);
+    if (token) { complete = false; break; }
+  }
+  if (add.length) sh.getRange(sh.getLastRow() + 1, 1, add.length, PHOTO_COLS.length).setValues(add);
+  var removed = 0;
+  if (complete) {                                                  // whole tree read: forget photos that are gone
+    for (var i = vals.length - 1; i >= 0; i--) if (!seen[vals[i][0]]) { sh.deleteRow(i + 2); removed++; }
+  }
+  props_().setProperty('photoSync', JSON.stringify({ at: now, complete: complete, added: add.length, removed: removed }));
+  return { added: add.length, removed: removed, complete: complete };
+}
+
+function api_photoSyncNow() { var r = syncPhotos_(Date.now() - 180000); return r; }   // ~60 seconds from the app
+
+function photoRows_() {
+  var sh = photoSheet_(), v = sh.getDataRange().getValues(); v.shift();
+  return v.map(function (r, i) {
+    return { id: String(r[0]), name: String(r[1]), taken: r[2] instanceof Date ? r[2].toISOString() : String(r[2]), mime: String(r[3]),
+      folder: String(r[4]), tags: splitTags_(r[5]), status: String(r[6]), w: +r[8] || 0, h: +r[9] || 0, row: i + 2 };
+  });
+}
+
+function tagSet_(tag) {
+  var kids = {}; readTable_('Tags').forEach(function (t) { var p = String(t.parent || ''); (kids[p] = kids[p] || []).push(String(t.name)); });
+  var set = {}; (function walk(x) { set[x] = 1; (kids[x] || []).forEach(walk); })(tag);
+  return set;
+}
+
+/** One page of photos. o: {view: 'inbox'|'filed'|'all', tag, year, month, folder, offset, limit} */
+function api_photos(o) {
+  o = o || {};
+  var rows = photoRows_(), set = o.tag ? tagSet_(o.tag) : null;
+  var list = rows.filter(function (p) {
+    if (o.view === 'inbox' && p.status) return false;
+    if (o.view === 'filed' && p.status !== 'filed') return false;
+    if (set && !p.tags.some(function (g) { return set[g]; })) return false;
+    if (o.year && p.taken.slice(0, 4) !== String(o.year)) return false;
+    if (o.month && p.taken.slice(5, 7) !== String(o.month)) return false;
+    if (o.folder && p.folder !== o.folder && p.folder.indexOf(o.folder + '/') !== 0) return false;
+    return true;
+  });
+  list.sort(function (a, b) { return a.taken < b.taken ? 1 : a.taken > b.taken ? -1 : 0; });
+  var off = +o.offset || 0, lim = Math.min(+o.limit || 120, 500);
+  return { total: list.length, offset: off, items: list.slice(off, off + lim).map(function (p) { delete p.row; return p; }) };
+}
+
+/** Counts for the Photos screen: inbox/filed, by year → month, and by tag. */
+function api_photoStats() {
+  var rows = photoRows_(), years = {}, tags = {}, folders = {}, inbox = 0, filed = 0;
+  rows.forEach(function (p) {
+    if (p.status === 'filed') filed++; else inbox++;
+    var y = p.taken.slice(0, 4) || '?', m = p.taken.slice(5, 7) || '?';
+    years[y] = years[y] || {}; years[y][m] = (years[y][m] || 0) + 1;
+    p.tags.forEach(function (t) { tags[t] = (tags[t] || 0) + 1; });
+    folders[p.folder] = (folders[p.folder] || 0) + 1;
+  });
+  var sync = {}; try { sync = JSON.parse(props_().getProperty('photoSync') || '{}'); } catch (e) {}
+  var root = photoRoot_();
+  return { total: rows.length, inbox: inbox, filed: filed, years: years, tags: tags, folders: folders, sync: sync, rootUrl: root.getUrl() };
+}
+
+/** Small square thumbnails (cached 6 hours). */
+function api_photoThumbs(ids) {
+  ids = (ids || []).slice(0, 40);
+  var cache = CacheService.getScriptCache(), got = cache.getAll(ids.map(function (id) { return 'pt:' + id; })), out = {}, need = [];
+  ids.forEach(function (id) { if (got['pt:' + id]) out[id] = got['pt:' + id]; else need.push(id); });
+  if (need.length) {
+    var hdr = { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() };
+    var meta = UrlFetchApp.fetchAll(need.map(function (id) {
+      return { url: 'https://www.googleapis.com/drive/v3/files/' + id + '?supportsAllDrives=true&fields=thumbnailLink', headers: hdr, muteHttpExceptions: true };
+    }));
+    var reqs = [], which = [];
+    meta.forEach(function (r, i) {
+      if (r.getResponseCode() !== 200) return;
+      var l = JSON.parse(r.getContentText()).thumbnailLink; if (!l) return;
+      reqs.push({ url: l.replace(/=s\d+(-c)?$/, '') + '=s320', headers: hdr, muteHttpExceptions: true }); which.push(need[i]);
+    });
+    var imgs = reqs.length ? UrlFetchApp.fetchAll(reqs) : [], put = {};
+    imgs.forEach(function (r, i) {
+      if (r.getResponseCode() !== 200) return;
+      var d = 'data:' + (r.getHeaders()['Content-Type'] || 'image/jpeg') + ';base64,' + Utilities.base64Encode(r.getContent());
+      out[which[i]] = d; if (d.length < 95000) put['pt:' + which[i]] = d;
+    });
+    try { cache.putAll(put, 21600); } catch (e) {}
+  }
+  return out;
+}
+
+/** A big preview for the photo viewer, plus details. */
+function api_photoView(id) {
+  var f = driveApi_('files/' + id + '?supportsAllDrives=true&fields=' + encodeURIComponent('name,mimeType,size,webViewLink,thumbnailLink,imageMediaMetadata(time,width,height,cameraMake,cameraModel,location),videoMediaMetadata(durationMillis)'));
+  var src = '';
+  try {
+    var hdr = { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() };
+    if (!f.thumbnailLink && /^image\/(jpeg|png|gif|webp)$/.test(f.mimeType) && +f.size < 2 * 1024 * 1024) {
+      var r0 = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + id + '?alt=media&supportsAllDrives=true', { headers: hdr, muteHttpExceptions: true });
+      if (r0.getResponseCode() === 200) src = 'data:' + f.mimeType + ';base64,' + Utilities.base64Encode(r0.getContent());
+    }
+    if (!src && f.thumbnailLink) {
+      var r = UrlFetchApp.fetch(f.thumbnailLink.replace(/=s\d+(-c)?$/, '') + '=s1600', { headers: hdr, muteHttpExceptions: true });
+      if (r.getResponseCode() === 200) src = 'data:' + (r.getHeaders()['Content-Type'] || 'image/jpeg') + ';base64,' + Utilities.base64Encode(r.getContent());
+    }
+  } catch (e) {}
+  var im = f.imageMediaMetadata || {};
+  return { src: src, name: f.name, mime: f.mimeType, url: f.webViewLink, video: /^video\//.test(f.mimeType),
+    camera: [im.cameraMake, im.cameraModel].filter(String).join(' '), location: im.location || null };
+}
+
+/** Tag / file / unfile photos. ch: {addTags, removeTags, status: 'filed' | ''} */
+function api_photoUpdate(ids, ch) {
+  ch = ch || {};
+  if ((ch.addTags || []).length) ensureTags_(ch.addTags);
+  var want = {}; ids.forEach(function (id) { want[id] = 1; });
+  var sh = photoSheet_(), v = sh.getDataRange().getValues(), changed = 0;
+  for (var i = 1; i < v.length; i++) {
+    if (!want[v[i][0]]) continue;
+    var tags = splitTags_(v[i][5]);
+    (ch.removeTags || []).forEach(function (t) { tags = tags.filter(function (g) { return g !== t; }); });
+    (ch.addTags || []).forEach(function (t) { if (tags.indexOf(t) < 0) tags.push(t); });
+    v[i][5] = tags.join(TAG_SEP);
+    if (ch.status !== undefined) v[i][6] = ch.status;
+    changed++;
+  }
+  if (changed) sh.getRange(1, 6, v.length, 2).setValues(v.map(function (r) { return [r[5], r[6]]; }));
+  return changed;
+}
+
+/** Tag renamed or deleted: apply the same change to photos. */
+function retagPhotos_(fn) {
+  var sh = ss_().getSheetByName('Photos'); if (!sh || sh.getLastRow() < 2) return;
+  var rng = sh.getRange(2, 6, sh.getLastRow() - 1, 1), v = rng.getValues(), ch = false;
+  v.forEach(function (r) { var b = splitTags_(r[0]), a = fn(b.slice()).join(TAG_SEP); if (a !== b.join(TAG_SEP)) { r[0] = a; ch = true; } });
+  if (ch) rng.setValues(v);
 }
