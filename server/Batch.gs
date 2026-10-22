@@ -1018,17 +1018,17 @@ function api_photos(o) {
 
 /** Counts for the Photos screen: inbox/filed, by year → month, and by tag. */
 function api_photoStats() {
-  var rows = photoRows_(), years = {}, tags = {}, folders = {}, inbox = 0, filed = 0;
+  var rows = photoRows_(), years = {}, tags = {}, ftags = {}, folders = {}, inbox = 0, filed = 0;
   rows.forEach(function (p) {
     if (p.status === 'filed') filed++; else inbox++;
     var y = p.taken.slice(0, 4) || '?', m = p.taken.slice(5, 7) || '?';
     years[y] = years[y] || {}; years[y][m] = (years[y][m] || 0) + 1;
-    p.tags.forEach(function (t) { tags[t] = (tags[t] || 0) + 1; });
+    p.tags.forEach(function (t) { tags[t] = (tags[t] || 0) + 1; if (p.status === 'filed') ftags[t] = (ftags[t] || 0) + 1; });
     folders[p.folder] = (folders[p.folder] || 0) + 1;
   });
   var sync = {}; try { sync = JSON.parse(props_().getProperty('photoSync') || '{}'); } catch (e) {}
   var root = photoRoot_();
-  return { total: rows.length, inbox: inbox, filed: filed, years: years, tags: tags, folders: folders, sync: sync, rootUrl: root.getUrl() };
+  return { total: rows.length, inbox: inbox, filed: filed, years: years, tags: tags, ftags: ftags, folders: folders, sync: sync, rootUrl: root.getUrl() };
 }
 
 /** Small square thumbnails (cached 6 hours). */

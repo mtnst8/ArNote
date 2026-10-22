@@ -578,16 +578,22 @@ function viewCabinet(){
     if(C.tag&&!S.parent.hasOwnProperty(C.tag)) C.tag='';
     var inCab=function(t){var set={};descendants(t).forEach(function(x){set[x]=1});return cab.filter(function(n){return n.tags.some(function(g){return set[g]})})};
     var chain=[],x=C.tag,g=0; while(x&&g++<12){chain.unshift(x);x=S.parent[x]}
-    var kids=(S.children[C.tag]||[]).map(function(k){return [k,inCab(k).length]}).filter(function(k){return k[1]});
-    var list=C.tag?byRecent(inCab(C.tag)):byRecent(cab);
+    var ft=(P.stats&&P.stats.ftags)||{}, phN=function(t){var n=0;descendants(t).forEach(function(x){n+=ft[x]||0});return n};   // filed photos count too
+    if(!P.stats) phStats().then(function(){if(S.view==='cabinet'&&C.mode==='tag')viewCabinet()}).catch(function(){});
+    var kids=(S.children[C.tag]||[]).map(function(k){return [k,inCab(k).length,phN(k)]}).filter(function(k){return k[1]||k[2]});
+    var list=C.tag?byRecent(inCab(C.tag)):byRecent(cab), nPh=C.tag?phN(C.tag):0;
     body='<div class="crumbs"><button class="cr" data-ct="">Cabinet</button>'+chain.map(function(c,i){return '<span class="sep">›</span>'+(i<chain.length-1?'<button class="cr" data-ct="'+esc(c)+'">'+esc(c)+'</button>':'<b>'+esc(c)+'</b>')}).join('')+' <span class="muted">('+list.length+')</span></div>'+
-      (kids.length?'<div class="subtags">'+kids.map(function(k){return '<button class="chip" data-ct="'+esc(k[0])+'">'+esc(k[0])+' <span class="muted">'+k[1]+'</span></button>'}).join('')+'</div>':'')+
-      (list.length?'<div class="list">'+list.map(rowHtml).join('')+'</div>':'<p class="muted">No Cabinet notes with this tag.</p>');
+      (kids.length?'<div class="subtags">'+kids.map(function(k){return '<button class="chip" data-ct="'+esc(k[0])+'">'+esc(k[0])+' <span class="muted">'+(k[1]||'')+(k[2]?(k[1]?' · ':'')+'📷'+k[2]:'')+'</span></button>'}).join('')+'</div>':'')+
+      (list.length?'<div class="list">'+list.map(rowHtml).join('')+'</div>':(nPh?'':'<p class="muted">No Cabinet notes with this tag.</p>'))+
+      (nPh?'<div class="lhead" style="margin-top:16px"><h2>Filed photos ('+nPh+')</h2></div><div class="phgrid" id="cabPh"><p class="muted">Loading…</p></div>':'');
   } else body='<div id="cabDrive"><p class="muted">Loading Drive folders…</p></div>';
   $('#main').innerHTML=tabs+body;
   $$('#cabTabs [data-m]').forEach(function(b){b.onclick=function(){C.mode=b.dataset.m;viewCabinet()}});
   $$('#main [data-ct]').forEach(function(b){b.onclick=function(){C.tag=b.dataset.ct;viewCabinet();window.scrollTo(0,0)}});
   if(C.mode==='drive') drawCabDrive(cab); else bindRows();
+  if($('#cabPh')) call('api_photos',{view:'filed',tag:C.tag,limit:1500}).then(function(r){var g=$('#cabPh');if(!g)return;
+    r.items.forEach(function(p){P.byId[p.id]=p}); P.secs=[{k:'',n:r.items.length,items:r.items}]; P.sel={};
+    g.innerHTML=r.items.map(phCell).join(''); phBind(g)}).catch(function(){});
 }
 function linkTree(force){
   if(S.ltree&&!force&&Date.now()-S.ltree.t<300000) return Promise.resolve(S.ltree.v);
@@ -1517,7 +1523,7 @@ function phBind(root){
 }
 function phPaint(){
   var n=Object.keys(P.sel).length; document.body.classList.toggle('phsel',n>0);
-  $$('#phTL .pc').forEach(function(c){var on=!!P.sel[c.dataset.id];c.classList.toggle('sel',on);var cb=c.querySelector('.pcb');if(cb)cb.checked=on});
+  $$('#phTL .pc, #cabPh .pc').forEach(function(c){var on=!!P.sel[c.dataset.id];c.classList.toggle('sel',on);var cb=c.querySelector('.pcb');if(cb)cb.checked=on});
   var bar=$('#phBar'); if(!bar) return;
   if(!n){bar.innerHTML=P.secs.length?'<div class="muted" style="font-size:12px;margin-top:4px">Tap the corner box (or long-press on a phone) to select · Shift-click selects a range · the box by a month selects the whole month</div>':'';return}
   var recent=(store('recentTags')||[]).filter(function(t){return S.parent.hasOwnProperty(t)}).slice(0,6);
@@ -1609,9 +1615,11 @@ function phRedraw(ids){
   var q=phQ(), set=q.tag?(function(){var s={};descendants(q.tag).forEach(function(x){s[x]=1});return s})():null;
   ids.forEach(function(id){var p=P.byId[id];if(!p)return;
     var keep=!(q.view==='inbox'&&p.status)&&!(q.view==='filed'&&p.status!=='filed')&&!(set&&!p.tags.some(function(g){return set[g]}));
-    $$('#phTL .pc[data-id="'+id+'"]').forEach(function(c){
-      if(!keep){var sec=P.secs[+c.closest('.phsec').dataset.i];if(sec&&sec.items){sec.items=sec.items.filter(function(x){return x.id!==id});sec.n=sec.items.length;
-        var h=c.closest('.phsec').querySelector('.phh .muted');if(h)h.textContent=sec.n} c.remove(); delete P.sel[id]; return}
+    $$('#phTL .pc[data-id="'+id+'"], #cabPh .pc[data-id="'+id+'"]').forEach(function(c){
+      var ps=c.closest('.phsec');
+      if(!keep&&!ps){c.remove();return}
+      if(!keep){var sec=P.secs[+ps.dataset.i];if(sec&&sec.items){sec.items=sec.items.filter(function(x){return x.id!==id});sec.n=sec.items.length;
+        var h=ps.querySelector('.phh .muted');if(h)h.textContent=sec.n} c.remove(); delete P.sel[id]; return}
       var pt=c.querySelector('.pt'); if(p.tags.length){if(!pt){pt=document.createElement('span');pt.className='pt';c.appendChild(pt)}pt.textContent=p.tags.join(', ')} else if(pt) pt.remove();
     })});
 }
