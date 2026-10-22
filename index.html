@@ -983,9 +983,9 @@ function tagCrumbs(t){
     ' <span class="muted">('+tagNotes(t).length+')</span></div>'+
     '<div class="subtags">'+kids.map(function(k){return '<button class="chip" data-crumb="'+esc(k)+'">'+esc(k)+' <span class="muted">'+tagCount(k)+'</span></button>'}).join('')+newTagChip(t)+'</div>';
 }
-/* "＋ New tag here": create a tag under the one you're looking at, right where you are. */
+/* "＋ New Tag": create a tag under the one you're looking at, right where you are. */
 S.newTags={};
-function newTagChip(parent){return '<button class="chip ghost" data-nt="'+esc(parent||'')+'" title="'+(parent?'New tag under '+esc(parent):'New top-level tag')+'">＋ New tag here</button>'}
+function newTagChip(parent){return '<button class="chip ghost" data-nt="'+esc(parent||'')+'" title="'+(parent?'New tag under '+esc(parent):'New top-level tag')+'">＋ New Tag</button>'}
 function bindNewTag(after){
   $$('#main [data-nt]').forEach(function(b){b.onclick=function(){var par=b.dataset.nt;
     var w=document.createElement('span');w.className='tagbox';w.innerHTML='<input placeholder="'+(par?'New tag under '+esc(par):'New top-level tag')+'" autocomplete="off">';
