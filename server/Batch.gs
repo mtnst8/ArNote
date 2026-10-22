@@ -427,7 +427,7 @@ function api_noteView(id) {
     var meta = driveMeta_(n.docId);
     if (!meta) return { html: '<p style="font:14px sans-serif">This linked file is missing or no longer shared with you.</p>', atts: [], docId: n.docId, link: { url: n.sourceUrl } };
     if (meta.mimeType !== 'application/vnd.google-apps.document')
-      return { html: linkedPreviewHtml_(n.docId, meta), atts: [], docId: n.docId, link: { url: meta.webViewLink || n.sourceUrl, mime: meta.mimeType, name: meta.name } };
+      return { html: linkedPreviewHtml_(n.docId, meta), atts: [], docId: n.docId, link: { url: meta.webViewLink || n.sourceUrl, mime: meta.mimeType, name: meta.name }, loc: linkLocation_(n.docId) };
   }
   var res = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + n.docId + '/export?mimeType=text/html',
     { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
@@ -435,7 +435,7 @@ function api_noteView(id) {
   html = html.replace(/<p\b[^>]*>(?:(?!<\/p>)[\s\S])*?Notebook:(?:(?!<\/p>)[\s\S])*?<\/p>/, '');
   var atts = readTable_('Attachments').filter(function (a) { return a.noteId === id; })
     .map(function (a) { return { fileId: a.fileId, filename: String(a.filename), mime: a.mime, bytes: +a.bytes }; });
-  return { html: html, atts: atts, docId: n.docId };
+  return { html: html, atts: atts, docId: n.docId, loc: n.source === 'link' ? linkLocation_(n.docId) : null };
 }
 
 /** Small page thumbnails for note cards, as data URIs. */
@@ -834,4 +834,29 @@ function shareDispatch_(token, fn, a) {
     return { name: f.getName(), mime: f.getMimeType(), b64: Utilities.base64Encode(f.getBlob().getBytes()) };
   }
   throw new Error('Not allowed');
+}
+
+/** Where a linked file lives: owning account and folder path (cached 6 hours). */
+function linkLocation_(id) {
+  var cache = CacheService.getScriptCache(), key = 'loc:' + id, hit = cache.get(key);
+  if (hit) return JSON.parse(hit);
+  var out = null;
+  try {
+    var f = driveApi_('files/' + id + '?supportsAllDrives=true&fields=name,parents,driveId,owners(emailAddress,displayName,me)');
+    var o = (f.owners || [])[0] || {};
+    var path = [], pid = f.parents && f.parents[0], guard = 0, top = null;
+    while (pid && guard++ < 15) {
+      var p = null; try { p = driveApi_('files/' + pid + '?supportsAllDrives=true&fields=id,name,parents'); } catch (e) {}
+      if (!p) break;
+      path.unshift({ id: p.id, name: p.name }); top = p;
+      pid = p.parents && p.parents[0];
+    }
+    // Reached the account's own My Drive only if the top folder has no parent and the file is ours; otherwise the
+    // folders above are in someone else's Drive and not visible from here.
+    var myRoot = props_().getProperty('myDriveRoot');
+    var full = !!top && (top.id === myRoot || (!pid && !!o.me));
+    out = { owner: o.emailAddress || '', ownerName: o.displayName || '', me: !!o.me, shared: !!f.driveId, path: path, partial: !full };
+  } catch (e) { out = null; }
+  if (out) cache.put(key, JSON.stringify(out), 21600);
+  return out;
 }

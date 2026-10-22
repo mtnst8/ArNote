@@ -95,6 +95,8 @@ textarea,.field{width:100%;padding:9px 12px;border:1px solid var(--line);border-
 .modal .mf{padding:10px 16px 14px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;align-items:center}
 .modal .mf .grow{flex:1;color:var(--mute);font-size:13px}
 .modal .tree{border:0;padding:0}
+.loc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:7px 10px;margin:6px 0;font-size:13px;line-height:1.6}
+.loc .acct{font-weight:600}.loc a{color:var(--acc);text-decoration:none}.loc a:hover{text-decoration:underline}.loc .sep{color:var(--mute);margin:0 3px}
 .pp .pptree{max-height:min(46vh,340px);overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:6px}
 .pp .trow.on{background:var(--acc);color:#fff}.pp .trow.on .tw,.pp .trow.on .path{color:#fff}
 .pp .ppcur{font-size:13px;color:var(--mute);margin-bottom:6px}.pp .ppcur b{color:var(--ink)}
@@ -571,10 +573,11 @@ function renderPv(){
     '<div class="muted" style="font-size:12px">Created '+fmt(n.created)+(n.att?' · 📎'+n.att:'')+'</div>'+
     '<div class="bar" id="tagbar"></div>'+
     '<div class="bar"><button class="btn primary" id="pvFile">File → Cabinet</button><button class="btn" id="pvOpen">Open / edit</button><button class="btn danger" id="pvDel">Delete</button>'+
-    '<span class="kbd">Keys: ↑ ↓ move · T add tag · F file · Enter open</span></div>'+
+    '<span class="kbd">Keys: ↑ ↓ move · T add tag · F file · Enter open</span></div><div id="pvloc"></div>'+
     readerHtml();
   renderTags(n);
-  fillReader($('#pv .reader'),n.id);
+  var pf=fillReader($('#pv .reader'),n.id);
+  if(n.link&&pf) pf.then(function(d){if(d&&d.loc&&$('#pvloc')&&S.pv===n.id)$('#pvloc').innerHTML=locHtml(d.loc,n)}).catch(function(){});
   var ti=$('#pvTitle');
   ti.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();ti.blur()}else if(e.key==='Escape'){ti.value=n.title;ti.blur()}};
   ti.onblur=function(){var v=ti.value.trim();if(!v){ti.value=n.title;return}if(v===n.title)return;
@@ -617,6 +620,16 @@ document.addEventListener('keydown',function(e){
 var DROP_URL='';
 var UP_MAX=35*1024*1024;
 var LINK_URL='';
+/** Where a linked file lives: owning account + clickable folder path, so you know where to change it. */
+function locHtml(loc,n){
+  if(!loc) return '';
+  var au=loc.owner?'?authuser='+encodeURIComponent(loc.owner):'';
+  var p=(loc.partial?'<span class="muted">'+(loc.owner&&!loc.me?esc(loc.ownerName||loc.owner)+'\'s Drive':'…')+'</span><span class="sep">›</span>':'')+
+    loc.path.map(function(f){return '<a target="_blank" href="https://drive.google.com/drive/folders/'+esc(f.id)+au+'">'+esc(f.name)+'</a>'}).join('<span class="sep">›</span>')+
+    (loc.path.length?'<span class="sep">›</span>':'')+'<b>'+esc(n.title)+'</b>';
+  return '<div class="loc">📍 <span class="acct">'+esc(loc.owner||'Unknown account')+'</span>'+(loc.me?' <span class="muted">(this ArNote account)</span>':'')+'<br>'+p+
+    (loc.owner&&!loc.me?'<br><a target="_blank" href="'+esc(linkUrl(n).replace(/([?&])authuser=[^&]*/,'$1authuser='+encodeURIComponent(loc.owner)))+'">Open as '+esc(loc.owner)+' ↗</a> <span class="muted">(to edit it in the owner\'s account)</span>':'')+'</div>';
+}
 function linkUrl(n){var u=n.sourceUrl||('https://drive.google.com/file/d/'+n.docId+'/view');return u+(S.user?(u.indexOf('?')<0?'?':'&')+'authuser='+encodeURIComponent(S.user):'')}
 function upBar(){return '<div class="bar upbar"><button class="btn" id="upBtn">＋ Add files</button><button class="btn" id="lnkBtn">🔗 Link Drive files</button><input type="file" id="upIn" multiple hidden>'+
   '<span class="muted">or drag files here'+(DROP_URL?' · bigger files: <a href="'+DROP_URL+'" target="_blank">Drive Drop folder</a>':'')+'</span></div>'}
@@ -995,11 +1008,12 @@ function viewNote(id,keep){
         (n.sourceUrl?'<a class="btn" target="_blank" href="'+esc(n.sourceUrl)+'">Source</a>':''))+
       '<button class="btn" id="nprint">🖨 Print</button>'+
       '<button class="btn danger" id="del">'+(n.link?'Remove link':'Delete')+'</button></div>'+
-    '<div class="atts" id="atts"></div>'+
+    '<div id="nloc"></div><div class="atts" id="atts"></div>'+
     '<div class="muted" id="ehint" style="font-size:12px;margin:2px 0 6px">'+(n.link?'🔗 Linked file: it stays where it is in your Drive. Edits happen in the original; removing this note never deletes the file.':'Reading view. To change the text, use Edit in Google Docs (on a phone it opens the Docs app).')+'</div>'+
     '<div id="nbody">'+readerHtml()+'</div>';
   renderTags(n);
   var fr=fillReader($('#nbody .reader'),id,true);
+  if(fr) fr.then(function(d){if(n.link&&d&&d.loc&&$('#nloc'))$('#nloc').innerHTML=locHtml(d.loc,n)}).catch(function(){});
   if(fr) fr.then(function(d){if(d&&d.atts&&d.atts.length&&$('#atts'))$('#atts').innerHTML=d.atts.map(function(a){return '<a target="_blank" href="'+fileUrl(a.fileId)+'">📎 '+esc(a.filename)+'</a>'}).join('')}).catch(function(){});
   $('#odocs').onclick=function(){S.editing=id};
   $('#nprint').onclick=function(){printNotes([id])};
