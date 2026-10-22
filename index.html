@@ -262,10 +262,13 @@ function toast(m){var t=$('#toast');t.textContent=m;t.classList.add('on');clearT
 /* ---------- server connection (each person runs their own private server; see README) ---------- */
 var CFG=null; try{CFG=JSON.parse(localStorage.getItem('arnote.cfg')||'null')}catch(e){}
 function saveCfg(c){CFG=c;try{if(c)localStorage.setItem('arnote.cfg',JSON.stringify(c));else localStorage.removeItem('arnote.cfg')}catch(e){}}
-function rawCall(cfg,fn,a){
+function rawCall(cfg,fn,a,retried){
   return fetch(cfg.api,{method:'POST',body:JSON.stringify({k:cfg.key,fn:fn,a:a||[]})})
     .then(function(r){if(!r.ok)throw new Error('Server error '+r.status);return r.text()})
-    .then(function(t){var j;try{j=JSON.parse(t)}catch(e){throw new Error(/<html/i.test(t)?'The server address looks wrong (got a web page instead of ArNote)':'Bad reply from server')}
+    .then(function(t){
+      // Google occasionally turns the request into a plain page load; the action never ran, so it's safe to send again.
+      if(/^ArNote server is running/.test(t)){if(retried)throw new Error('The server didn\'t receive the request. Try again in a moment.');return new Promise(function(res){setTimeout(res,800)}).then(function(){return rawCall(cfg,fn,a,true)})}
+      var j;try{j=JSON.parse(t)}catch(e){throw new Error(/<html/i.test(t)?'The server address looks wrong (got a web page instead of ArNote)':'Bad reply from server')}
       if(!j.ok)throw new Error(j.error||'Server error');return j.result});
 }
 function call(fn){var a=[].slice.call(arguments,1);
