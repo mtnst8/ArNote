@@ -1221,9 +1221,15 @@ function addTagTo(n,t,refocus){
 
 /* ---------- quick capture ---------- */
 function viewNew(){
-  $('#main').innerHTML='<div class="lhead"><h2>New note → Inbox</h2></div><input class="field" id="nt" placeholder="Title"><br><br>'+
+  $('#main').innerHTML='<div class="lhead"><h2>New note → Inbox</h2></div>'+
+    '<div class="bar newopts" style="margin:6px 0 14px"><button class="btn" id="noLink">🔗 Link Drive files</button><button class="btn" id="noFiles">＋ Add files</button><button class="btn" id="noPhoto">📷 Photos</button><input type="file" id="noIn" multiple hidden></div>'+
+    '<input class="field" id="nt" placeholder="Title"><br><br>'+
     '<textarea id="nb" rows="10" placeholder="Note"></textarea><br><br><button class="btn primary" id="ns">Save</button>';
-  $('#nt').focus();
+  $('#noLink').onclick=linkDialog;
+  $('#noFiles').onclick=function(){$('#noIn').click()};
+  $('#noIn').onchange=function(){var f=[].slice.call(this.files);this.value='';uploadFiles(f,{open:true})};
+  $('#noPhoto').onclick=function(){$('#camIn').click()};
+  if(window.innerWidth>=700) $('#nt').focus();
   $('#ns').onclick=function(){ var b=this;b.disabled=true;b.textContent='Saving…';
     call('api_createNote',$('#nt').value,$('#nb').value,[]).then(function(){return load()}).then(function(){toast('Saved to Inbox');go('inbox')}) };
 }
