@@ -532,7 +532,59 @@ function bookmarks(){
 }
 function byRecent(arr){return arr.slice().sort(function(a,b){return String(b.updated).localeCompare(String(a.updated))})}
 function viewShortcuts(){ var arr=bookmarks(); $('#main').innerHTML=section('Shortcuts ('+arr.length+')',arr,'Star a note (☆) to add it to Shortcuts.'); bindRows(); }
-function viewCabinet(){ var arr=byRecent(S.notes.filter(function(n){return n.notebook==='Cabinet'})); $('#main').innerHTML=section('Cabinet ('+arr.length+')',arr); bindRows(); }
+/* ---------- Cabinet: browse everything, or drill down by tag or by where linked files live in Drive ---------- */
+function viewCabinet(){
+  var C=S.cab=S.cab||{mode:'all',tag:'',path:[]};
+  var cab=S.notes.filter(function(n){return n.notebook==='Cabinet'});
+  var tabs='<div class="tabs" id="cabTabs" style="margin:14px 0 4px">'+[['all','All'],['tag','By tag'],['drive','By Drive']].map(function(t){
+    return '<button data-m="'+t[0]+'"'+(C.mode===t[0]?' class="on"':'')+'>'+t[1]+'</button>'}).join('')+'</div>';
+  var body='';
+  if(C.mode==='all'){ body=section('Cabinet ('+cab.length+')',byRecent(cab)); }
+  else if(C.mode==='tag'){
+    if(C.tag&&!S.parent.hasOwnProperty(C.tag)) C.tag='';
+    var inCab=function(t){var set={};descendants(t).forEach(function(x){set[x]=1});return cab.filter(function(n){return n.tags.some(function(g){return set[g]})})};
+    var chain=[],x=C.tag,g=0; while(x&&g++<12){chain.unshift(x);x=S.parent[x]}
+    var kids=(S.children[C.tag]||[]).map(function(k){return [k,inCab(k).length]}).filter(function(k){return k[1]});
+    var list=C.tag?byRecent(inCab(C.tag)):byRecent(cab);
+    body='<div class="crumbs"><button class="cr" data-ct="">Cabinet</button>'+chain.map(function(c,i){return '<span class="sep">›</span>'+(i<chain.length-1?'<button class="cr" data-ct="'+esc(c)+'">'+esc(c)+'</button>':'<b>'+esc(c)+'</b>')}).join('')+' <span class="muted">('+list.length+')</span></div>'+
+      (kids.length?'<div class="subtags">'+kids.map(function(k){return '<button class="chip" data-ct="'+esc(k[0])+'">'+esc(k[0])+' <span class="muted">'+k[1]+'</span></button>'}).join('')+'</div>':'')+
+      (list.length?'<div class="list">'+list.map(rowHtml).join('')+'</div>':'<p class="muted">No Cabinet notes with this tag.</p>');
+  } else body='<div id="cabDrive"><p class="muted">Loading Drive folders…</p></div>';
+  $('#main').innerHTML=tabs+body;
+  $$('#cabTabs [data-m]').forEach(function(b){b.onclick=function(){C.mode=b.dataset.m;viewCabinet()}});
+  $$('#main [data-ct]').forEach(function(b){b.onclick=function(){C.tag=b.dataset.ct;viewCabinet();window.scrollTo(0,0)}});
+  if(C.mode==='drive') drawCabDrive(cab); else bindRows();
+}
+function linkTree(force){
+  if(S.ltree&&!force&&Date.now()-S.ltree.t<300000) return Promise.resolve(S.ltree.v);
+  return call('api_linkTree').then(function(v){S.ltree={t:Date.now(),v:v};return v});
+}
+function drawCabDrive(cab){
+  var C=S.cab;
+  linkTree().then(function(T){ if(S.view!=='cabinet'||C.mode!=='drive'||!$('#cabDrive')) return;
+    // each linked Cabinet note → [account, folder, sub-folder, …]
+    function pathOf(n){var info=T.notes[n.id]; if(!info) return null;
+      var acct=info.drive?'Shared drives':(info.owner||'Unknown account'), segs=[], id=info.parent, g=0;
+      while(id&&g++<20){var f=T.folders[id]; if(!f||!f.name) break; if(id===T.root) {break} segs.unshift({id:id,name:f.name}); id=f.parent}
+      return [{id:'acct:'+acct,name:acct===T.me?acct+' (this account)':acct}].concat(segs)}
+    var rows=cab.filter(function(n){return n.link}).map(function(n){return {n:n,p:pathOf(n)}}).filter(function(r){return r.p});
+    var here=rows.filter(function(r){return C.path.every(function(id,i){return r.p[i]&&r.p[i].id===id})});
+    if(C.path.length&&!here.length){C.path=[];here=rows}
+    var kids={},order=[]; here.forEach(function(r){var c=r.p[C.path.length]; if(!c) return; if(!kids[c.id]){kids[c.id]={name:c.name,n:0};order.push(c.id)} kids[c.id].n++});
+    order.sort(function(a,b){return kids[a].name.localeCompare(kids[b].name,undefined,{numeric:true})});
+    var names=C.path.map(function(id,i){var r=here[0];return r&&r.p[i]?r.p[i].name:id});
+    var list=byRecent(here.map(function(r){return r.n}));
+    $('#cabDrive').innerHTML=(rows.length?'':'<p class="muted">No linked Drive files in the Cabinet yet. Link a folder from Inbox → 🔗 Link Drive files and its files are filed here.</p>')+
+      (rows.length?'<div class="crumbs"><button class="cr" data-cp="-1">Drive</button>'+names.map(function(nm,i){return '<span class="sep">›</span>'+(i<names.length-1?'<button class="cr" data-cp="'+i+'">'+esc(nm)+'</button>':'<b>'+esc(nm)+'</b>')}).join('')+' <span class="muted">('+list.length+')</span>'+
+        '<button class="btn small" id="cabRef" style="margin-left:auto" title="Re-read folders from Drive">↻</button></div>'+
+        (order.length?'<div class="subtags">'+order.map(function(id){return '<button class="chip" data-cd="'+esc(id)+'">'+(C.path.length?'📁 ':'')+esc(kids[id].name)+' <span class="muted">'+kids[id].n+'</span></button>'}).join('')+'</div>':'')+
+        '<div class="list">'+list.map(rowHtml).join('')+'</div>':'');
+    $$('#cabDrive [data-cp]').forEach(function(b){b.onclick=function(){C.path=C.path.slice(0,+b.dataset.cp+1);drawCabDrive(cab)}});
+    $$('#cabDrive [data-cd]').forEach(function(b){b.onclick=function(){C.path=C.path.concat([b.dataset.cd]);drawCabDrive(cab)}});
+    if($('#cabRef')) $('#cabRef').onclick=function(){$('#cabDrive').innerHTML='<p class="muted">Reading folders from Drive…</p>';linkTree(true).then(function(){drawCabDrive(cab)})};
+    bindRows();
+  }).catch(function(){if($('#cabDrive'))$('#cabDrive').innerHTML='<p class="muted">Could not load Drive folders.</p>'});
+}
 
 /* ---------- Home: Evernote-style widgets ---------- */
 var THUMBS={}; try{THUMBS=JSON.parse(localStorage.getItem('arnote.thumbs')||'{}')}catch(e){}

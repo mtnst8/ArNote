@@ -860,3 +860,52 @@ function linkLocation_(id) {
   if (out) cache.put(key, JSON.stringify(out), 21600);
   return out;
 }
+
+/** Cabinet → By Drive: for every linked note, the owning account and its folder chain (parallel Drive calls, cached 6 hours). */
+function api_linkTree() {
+  var notes = readTable_('Notes').filter(function (n) { return n.source === 'link'; });
+  var cache = CacheService.getScriptCache(), hdr = { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() };
+  var base = 'https://www.googleapis.com/drive/v3/files/';
+  function fetchMany(ids, fields) {
+    var out = {};
+    for (var i = 0; i < ids.length; i += 50) {
+      var part = ids.slice(i, i + 50);
+      var res = UrlFetchApp.fetchAll(part.map(function (id) {
+        return { url: base + id + '?supportsAllDrives=true&fields=' + encodeURIComponent(fields), headers: hdr, muteHttpExceptions: true };
+      }));
+      res.forEach(function (r, k) { out[part[k]] = r.getResponseCode() === 200 ? JSON.parse(r.getContentText()) : null; });
+    }
+    return out;
+  }
+  function cachedMany(prefix, ids, fields, shape) {
+    var out = {}, need = [], got = {};
+    for (var i = 0; i < ids.length; i += 100) {
+      var g = cache.getAll(ids.slice(i, i + 100).map(function (id) { return prefix + id; }));
+      for (var key in g) got[key] = g[key];
+    }
+    ids.forEach(function (id) { var v = got[prefix + id]; if (v) out[id] = JSON.parse(v); else need.push(id); });
+    if (need.length) {
+      var f = fetchMany(need, fields), put = {};
+      need.forEach(function (id) { out[id] = shape(f[id]); put[prefix + id] = JSON.stringify(out[id]); });
+      try { cache.putAll(put, 21600); } catch (e) {}
+    }
+    return out;
+  }
+  var docIds = []; notes.forEach(function (n) { if (docIds.indexOf(n.docId) < 0) docIds.push(n.docId); });
+  var files = cachedMany('lt:', docIds, 'parents,owners(emailAddress),driveId', function (f) {
+    return f ? { owner: (f.owners && f.owners[0] && f.owners[0].emailAddress) || '', parent: (f.parents || [])[0] || '', drive: f.driveId || '' } : { owner: '', parent: '', drive: '' };
+  });
+  var folders = {}, level = [];
+  docIds.forEach(function (d) { var p = files[d].parent; if (p && level.indexOf(p) < 0) level.push(p); });
+  for (var depth = 0; depth < 15 && level.length; depth++) {
+    var got = cachedMany('lf:', level, 'name,parents', function (f) { return f ? { name: f.name, parent: (f.parents || [])[0] || '' } : { name: null, parent: '' }; });
+    var next = [];
+    level.forEach(function (id) { folders[id] = got[id]; var p = got[id].parent; if (p && !folders[p] && next.indexOf(p) < 0) next.push(p); });
+    level = next;
+  }
+  var p = props_(), root = p.getProperty('myDriveRoot');
+  if (!root) { try { root = driveApi_('files/root?fields=id').id; p.setProperty('myDriveRoot', root); } catch (e) {} }
+  var out = {};
+  notes.forEach(function (n) { out[n.id] = files[n.docId]; });
+  return { root: root || '', me: Session.getEffectiveUser().getEmail(), notes: out, folders: folders };
+}
