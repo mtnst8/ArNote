@@ -213,6 +213,7 @@ body.guest #actbar,body.guest .row .nb{display:none!important}
 .shrow.off{opacity:.6}.shl{display:flex;flex-direction:column;min-width:0}.shl span{font-size:12px}.shb{display:flex;gap:6px;flex-wrap:wrap}
 .acrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0}.acrow .mono{flex:1;min-width:160px}
 .tshare{margin-left:auto}
+#lkWho .chip .muted{color:inherit;opacity:.7}
 </style>
 </head>
 <body>
@@ -642,7 +643,7 @@ function linkDialog(){
   modal('Link Drive files','Files stay exactly where they are in your Drive. ArNote adds a note that points to each one.',
     '<div class="tabs" id="lkTabs" style="margin-bottom:8px"><button data-t="browse" class="on">Browse Drive</button><button data-t="paste">Paste links</button></div>'+
     '<div id="lkBrowse"><div class="setrow" style="margin:0 0 6px"><input class="field" id="lkQ" placeholder="Search Drive by name…" autocomplete="off" style="flex:1"></div>'+
-      '<div class="crumbs" id="lkCr" style="margin:4px 0 6px;font-size:14px"></div><div id="lkList" class="pick" style="max-height:46vh;min-height:260px"></div></div>'+
+      '<div class="crumbs" id="lkCr" style="margin:4px 0 6px;font-size:14px"></div><div id="lkWho" class="subtags" style="margin:0 0 6px"></div><div id="lkList" class="pick" style="max-height:46vh;min-height:260px"></div></div>'+
     '<div id="lkPaste" style="display:none"><label class="muted" style="font-size:13px">Paste Drive links (one or more). A folder link links every file in it into the Cabinet, tagged with the folder name, and keeps it in sync.</label>'+
       '<textarea id="lnkTxt" rows="5" placeholder="https://docs.google.com/document/d/…&#10;https://drive.google.com/drive/folders/…" style="margin-top:6px"></textarea>'+
       '<p class="muted" style="font-size:13px;margin:10px 0 0"><b>From the Drive app:</b> Organize → Add shortcut → <b>ArNote › Link</b>'+(LINK_URL?' (<a href="'+LINK_URL+'" target="_blank" style="color:var(--acc)">Link folder</a>)':'')+'. Shows up within 15 minutes.</p></div>',
@@ -667,9 +668,19 @@ function linkDialog(){
     else if(d.path.length) cr=(d.path[0].id==='shared'?'':'<button class="cr" data-w="root">My Drive</button>')+d.path.map(function(p,i){return (i||d.path[0].id!=='shared'?'<span class="sep">›</span>':'')+(i<d.path.length-1?'<button class="cr" data-w="'+esc(p.id)+'">'+esc(p.name)+'</button>':'<b>'+esc(p.name)+'</b>')}).join('');
     else cr='<b>My Drive</b><span class="sep">·</span><button class="cr" data-w="shared">Shared with me</button>';
     $('#lkCr').innerHTML=cr;
-    $('#lkList').innerHTML=d.items.length?d.items.map(function(it){var dis=it.linked||it.synced;
+    // Shared with me / search: pick whose files to see
+    var showWho=d.where==='shared'||!!d.q, owners={};
+    if(showWho) d.items.forEach(function(it){var o=it.owner||'(shared drive)';owners[o]=(owners[o]||0)+1});
+    var ol=Object.keys(owners).sort(function(a,b){return owners[b]-owners[a]});
+    if(st.owner&&!owners[st.owner]) st.owner='';
+    $('#lkWho').innerHTML=showWho&&ol.length>1?'<span class="muted" style="font-size:12px;margin-right:4px">From:</span>'+
+      '<button class="chip" data-o=""'+(!st.owner?' style="background:var(--acc);color:#fff"':'')+'>Everyone <span class="muted">'+d.items.length+'</span></button>'+
+      ol.map(function(o){return '<button class="chip" data-o="'+esc(o)+'" title="'+esc(o)+'"'+(st.owner===o?' style="background:var(--acc);color:#fff"':'')+'>'+esc(o===S.user?'me':o.replace(/@gmail\.com$/,''))+' <span class="muted">'+owners[o]+'</span></button>'}).join(''):'';
+    $$('#lkWho [data-o]').forEach(function(b){b.onclick=function(){st.owner=b.dataset.o;draw()}});
+    var items=showWho&&st.owner?d.items.filter(function(it){return (it.owner||'(shared drive)')===st.owner}):d.items;
+    $('#lkList').innerHTML=items.length?items.map(function(it){var dis=it.linked||it.synced;
       return '<div class="trow" data-id="'+esc(it.id)+'"><input type="checkbox" data-id="'+esc(it.id)+'"'+(st.sel[it.id]?' checked':'')+(dis?' disabled':'')+'>'+
-        '<span class="nm"'+(it.folder?' data-open="1"':'')+' title="'+esc(it.name)+'">'+icon(it)+' '+esc(it.name)+(it.folder?' <span class="path">›</span>':'')+'</span>'+
+        '<span class="nm"'+(it.folder?' data-open="1"':'')+' title="'+esc(it.name)+'">'+icon(it)+' '+esc(it.name)+(it.folder?' <span class="path">›</span>':'')+(showWho&&!st.owner&&it.owner&&it.owner!==S.user?' <span class="path">'+esc(it.owner)+'</span>':'')+'</span>'+
         (it.linked?'<span class="c">🔗 linked</span>':it.synced?'<span class="c">syncing</span>':'')+'</div>'}).join(''):'<p class="muted" style="padding:10px">Nothing here.</p>';
     $$('#lkCr [data-w]').forEach(function(b){b.onclick=function(){$('#lkQ').value='';load(b.dataset.w)}});
     $$('#lkList [data-open]').forEach(function(el){el.onclick=function(){load(el.closest('.trow').dataset.id)}});
