@@ -280,7 +280,29 @@ function docUrl(docId,edit){return 'https://docs.google.com/document/d/'+docId+(
 function fileUrl(id){return 'https://drive.google.com/file/d/'+id+'/view'+(S.user?'?authuser='+encodeURIComponent(S.user):'')}
 /** Note body in a sandboxed frame (works on any device, whatever Google account the browser uses). */
 function readerHtml(){return '<iframe class="reader" sandbox="allow-popups allow-popups-to-escape-sandbox" srcdoc="'+esc('<p style="font:14px sans-serif;color:#888;padding:16px">Loading…</p>')+'"></iframe>'}
-var noteCache={};
+var noteCache={}, nvPending={};
+/* Note previews are kept on this device so they open instantly; the server copy is checked in the background. */
+var NV_MAX=80, NV_BIG=400000;
+function nvIdx(){try{return JSON.parse(localStorage.getItem('arnote.nvidx')||'[]')}catch(e){return []}}
+function nvGet(id){if(noteCache[id])return noteCache[id];try{var v=JSON.parse(localStorage.getItem('arnote.nv.'+id)||'null');if(v)noteCache[id]=v;return v}catch(e){return null}}
+function nvPut(id,v){noteCache[id]=v; if(G) return;
+  try{var j=JSON.stringify(v); if(j.length>NV_BIG) return;
+    var idx=nvIdx().filter(function(x){return x!==id}); idx.push(id);
+    while(idx.length>NV_MAX){localStorage.removeItem('arnote.nv.'+idx.shift())}
+    for(var tries=0;tries<4;tries++){try{localStorage.setItem('arnote.nv.'+id,j);break}catch(e){var drop=idx.splice(0,Math.ceil(idx.length/2)).filter(function(x){return x!==id});drop.forEach(function(x){localStorage.removeItem('arnote.nv.'+x)});if(!drop.length)return}}
+    localStorage.setItem('arnote.nvidx',JSON.stringify(idx));
+  }catch(e){}}
+function nvFetch(id){
+  if(nvPending[id]) return nvPending[id];
+  var p=call('api_noteView',id).then(function(v){v._t=Date.now();nvPut(id,v);delete nvPending[id];return v},function(e){delete nvPending[id];throw e});
+  return nvPending[id]=p;
+}
+/** Quietly load the next few notes so they're ready when you get to them. */
+function prefetchNotes(ids){
+  if(G||!CFG) return;
+  ids=(ids||[]).filter(function(id){return id&&S.byId[id]&&!nvGet(id)}).slice(0,3);
+  ids.reduce(function(p,id){return p.then(function(){return nvGet(id)?null:nvFetch(id).catch(function(){})})},Promise.resolve());
+}
 function fillReader(frame,id,fresh){
   if(!frame) return;
   function put(v){var h=String(v.html||'');
@@ -289,8 +311,13 @@ function fillReader(frame,id,fresh){
     // Chrome doesn't always redraw when srcdoc changes on an existing frame, so swap in a fresh one
     var nf=frame.cloneNode(false); nf.removeAttribute('srcdoc'); nf.srcdoc=h;
     if(frame.isConnected) frame.replaceWith(nf); frame=nf;}
-  if(noteCache[id]&&!fresh){put(noteCache[id]);return Promise.resolve(noteCache[id])}
-  return call('api_noteView',id).then(function(v){noteCache[id]=v;if(frame.isConnected)put(v);return v});
+  var c=nvGet(id);
+  if(c){ put(c);
+    // show the saved copy now; check for changes in the background (always when asked, otherwise if it's over 2 minutes old)
+    if(fresh||Date.now()-(c._t||0)>120000) nvFetch(id).then(function(v){if(v.html!==c.html&&frame.isConnected)put(v)}).catch(function(){});
+    return Promise.resolve(c);
+  }
+  return nvFetch(id).then(function(v){if(frame.isConnected)put(v);return v});
 }
 function fmt(d){if(!d)return'';var x=new Date(d);return x.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})}
 function store(k,v){try{if(v===undefined)return JSON.parse(localStorage.getItem('arenote.'+k)||'null');localStorage.setItem('arenote.'+k,JSON.stringify(v))}catch(e){return null}}
@@ -363,7 +390,10 @@ function section(title,arr,empty,opts){
 var lastClicked=null;
 function bindRows(ids,onOpen){
   S.listIds=ids||$$('.row[data-id]').map(function(r){return r.dataset.id});
-  $$('.row[data-id]').forEach(function(r){r.onclick=function(e){
+  $$('.row[data-id]').forEach(function(r){var ht=null;
+    r.onmouseenter=function(){ht=setTimeout(function(){prefetchNotes([r.dataset.id])},250)};
+    r.onmouseleave=function(){clearTimeout(ht)};
+    r.onclick=function(e){
     var id=r.dataset.id;
     if(e.target.closest('.cbw')){
       e.preventDefault();
@@ -581,6 +611,7 @@ function renderPv(){
     readerHtml();
   renderTags(n);
   var pf=fillReader($('#pv .reader'),n.id);
+  var po=S.pvOrder||[],pi=po.indexOf(n.id); if(pi>=0) setTimeout(function(){prefetchNotes([po[pi+1],po[pi-1],po[pi+2]])},300);
   if(n.link&&pf) pf.then(function(d){if(d&&d.loc&&$('#pvloc')&&S.pv===n.id)$('#pvloc').innerHTML=locHtml(d.loc,n)}).catch(function(){});
   var ti=$('#pvTitle');
   ti.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();ti.blur()}else if(e.key==='Escape'){ti.value=n.title;ti.blur()}};
@@ -1134,7 +1165,7 @@ function viewSettings(){
     load(true).catch(function(){});
   }).catch(function(){});
   $('#reload').onclick=function(){load().then(function(){toast('Notes reloaded');go('home')})};
-  $('#unpair').onclick=function(){var b=this;if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Tap again to unpair';return}saveCfg(null);location.hash='';location.reload()};
+  $('#unpair').onclick=function(){var b=this;if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Tap again to unpair';return}saveCfg(null);try{Object.keys(localStorage).forEach(function(k){if(/^arnote\.nv/.test(k))localStorage.removeItem(k)})}catch(e){}location.hash='';location.reload()};
 }
 
 /* ---------- sharing a tag with other people (read-only links, no Google account needed) ---------- */
