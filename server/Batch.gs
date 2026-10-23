@@ -207,6 +207,7 @@ function processDrop() {
     try { made = made.concat(processLinks_(start)); } catch (e) { Logger.log('Links: ' + e); }
     try { syncPhotos_(Date.now() - 60000); } catch (e) { Logger.log('Photos: ' + e); }
     try { scanQueue_(90000); } catch (e) { Logger.log('Scan: ' + e); }
+    try { if (Date.now() - start < 250000) photoDedupe_(40000); } catch (e) { Logger.log('Dedupe: ' + e); }
   } finally { lock.releaseLock(); }
   try { flushHeaders_(5000); } catch (e) {}
   return made;
@@ -989,6 +990,58 @@ function syncPhotos_(start) {
   }
   props_().setProperty('photoSync', JSON.stringify({ at: now, complete: complete, added: add.length, removed: removed }));
   return { added: add.length, removed: removed, complete: complete };
+}
+
+/**
+ * Google Takeout saves every edit as its own file: x.jpg, x-edited.jpg, x-edited(1).jpg …
+ * One per shot is kept (the "-edited" version when there is one, as seen in Google Photos);
+ * the rest go to Drive trash (recoverable for 30 days) and leave the index. Same shot = same
+ * folder, base name, time taken and size, so different photos that share a name are left alone.
+ */
+function photoDedupe_(budget, dry) {
+  var start = Date.now(), rows = photoRows_(), groups = {};
+  rows.forEach(function (p) {
+    var m = p.name.match(/^(.*?)(-edited)?(\(\d+\))?(\.[^.]+)$/i); if (!m || !p.taken) return;
+    var k = [p.folder, m[1].toLowerCase(), m[4].toLowerCase(), p.taken, p.w + 'x' + p.h].join('|');
+    (groups[k] = groups[k] || []).push({ p: p, rank: (m[2] ? 0 : 2) + (m[3] ? 1 : 0) });
+  });
+  var drop = [], keepTags = {}, nGroups = 0;
+  Object.keys(groups).forEach(function (k) {
+    var g = groups[k]; if (g.length < 2) return;
+    nGroups++;
+    g.sort(function (a, b) { return a.rank - b.rank || a.p.name.length - b.p.name.length || (a.p.name < b.p.name ? -1 : 1); });
+    var keep = g[0].p, tags = keep.tags.slice(), status = keep.status;
+    g.slice(1).forEach(function (x) {
+      x.p.tags.forEach(function (t) { if (tags.indexOf(t) < 0) tags.push(t); });   // keep any tagging done on a copy
+      if (!status && x.p.status) status = x.p.status;
+      drop.push(x.p.id);
+    });
+    if (tags.length !== keep.tags.length || status !== keep.status) keepTags[keep.id] = { tags: tags, status: status };
+  });
+  if (dry || !drop.length) return { groups: nGroups, extra: drop.length, trashed: 0, left: drop.length };
+  var gone = {}, tok = ScriptApp.getOAuthToken(), n = 0;
+  for (var i = 0; i < drop.length && Date.now() - start < budget; i += 20) {
+    var reqs = drop.slice(i, i + 20).map(function (id) {
+      return { url: 'https://www.googleapis.com/drive/v3/files/' + id + '?supportsAllDrives=true', method: 'patch', contentType: 'application/json',
+        payload: JSON.stringify({ trashed: true }), headers: { Authorization: 'Bearer ' + tok }, muteHttpExceptions: true };
+    });
+    UrlFetchApp.fetchAll(reqs).forEach(function (r, j) { var c = r.getResponseCode(); if (c === 200 || c === 404) { gone[drop[i + j]] = 1; n++; } });
+  }
+  var sh = photoSheet_(), v = sh.getDataRange().getValues(), head = v.shift();
+  var out = v.filter(function (r) { return !gone[r[0]]; }).map(function (r) {
+    var kt = keepTags[r[0]]; if (kt) { r[5] = kt.tags.join(TAG_SEP); r[6] = kt.status; }
+    return r;
+  });
+  if (n || Object.keys(keepTags).length) {
+    sh.getRange(2, 1, v.length, head.length).clearContent();
+    if (out.length) sh.getRange(2, 1, out.length, head.length).setValues(out);
+  }
+  return { groups: nGroups, extra: drop.length, trashed: n, left: drop.length - n };
+}
+
+function api_photoDedupe(dry) {          // the 15-minute sync holds the same lock while it rewrites the Photos sheet
+  var lock = LockService.getScriptLock(); if (!lock.tryLock(30000)) throw new Error('Photos are syncing; try again in a minute');
+  try { return photoDedupe_(200000, dry); } finally { lock.releaseLock(); }
 }
 
 function api_photoSyncNow() { var r = syncPhotos_(Date.now() - 180000); return r; }   // ~60 seconds from the app
