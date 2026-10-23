@@ -937,12 +937,14 @@ function photoRoot_() {
 }
 
 /** "2019:07:04 12:34:56" (camera) → ISO; otherwise a date in the file name (IMG_20190704_123456, PXL_…, 2019-07-04 …). */
-function photoTaken_(f) {
+function photoTaken_(f, path) {
   var t = f.imageMediaMetadata && f.imageMediaMetadata.time;
   var m = t && String(t).match(/^(\d{4}):(\d\d):(\d\d)[ T](\d\d):(\d\d):(\d\d)/);
   if (m && +m[1] > 1980) return m[1] + '-' + m[2] + '-' + m[3] + 'T' + m[4] + ':' + m[5] + ':' + m[6];
   m = String(f.name).match(/(19[89]\d|20\d\d)[-_.]?(0[1-9]|1[0-2])[-_.]?(0[1-9]|[12]\d|3[01])(?:[-_ T.]?([01]\d|2[0-3])[-_.:]?([0-5]\d)[-_.:]?([0-5]\d))?/);
   if (m) return m[1] + '-' + m[2] + '-' + m[3] + 'T' + (m[4] || '12') + ':' + (m[5] || '00') + ':' + (m[6] || '00');
+  m = String(path || '').match(/Photos from ((?:19|20)\d\d)\b/);     // Google Takeout year folder: no camera date, no date in the name
+  if (m) return m[1] + '-01-01T00:00:00';
   return String(f.createdTime || '').slice(0, 19);
 }
 
@@ -952,7 +954,7 @@ function syncPhotos_(start) {
   var root = photoRoot_().getId(), sh = photoSheet_();
   var vals = sh.getDataRange().getValues(); vals.shift();
   var known = {}; vals.forEach(function (r, i) { known[r[0]] = i; });
-  var seen = {}, add = [], queue = [{ id: root, path: '' }], complete = true, now = new Date().toISOString();
+  var seen = {}, add = [], fix = [], queue = [{ id: root, path: '' }], complete = true, now = new Date().toISOString();
   while (queue.length) {
     if (Date.now() - start > 240000) { complete = false; break; }
     var dir = queue.shift(), token = '';
@@ -965,9 +967,13 @@ function syncPhotos_(start) {
         if (f.mimeType === 'application/vnd.google-apps.folder') { queue.push({ id: f.id, path: dir.path ? dir.path + '/' + f.name : f.name }); return; }
         if (!/^(image|video)\//.test(f.mimeType)) return;          // skip Takeout .json sidecars and anything else
         seen[f.id] = 1;
-        if (known[f.id] !== undefined) return;
+        if (known[f.id] !== undefined) {                         // already indexed: re-date undated photos from their Takeout year folder
+          var ki = known[f.id], t2 = ki >= 0 && /Photos from/.test(dir.path) ? photoTaken_(f, dir.path) : '';
+          if (t2 && /-01-01T00:00:00$/.test(t2) && t2 !== String(vals[ki][2])) fix.push([ki + 2, t2]);
+          return;
+        }
         var md = f.imageMediaMetadata || f.videoMediaMetadata || {};
-        var tk = photoTaken_(f), recent = tk && (Date.now() - new Date(tk).getTime()) < 60 * 864e5;   // only new photos get read for receipts/cards
+        var tk = photoTaken_(f, dir.path), recent = tk && (Date.now() - new Date(tk).getTime()) < 60 * 864e5;   // only new photos get read for receipts/cards
         add.push([f.id, f.name, tk, f.mimeType, dir.path, '', '', now, md.width || '', md.height || '', recent && /^image\//.test(f.mimeType) ? 'q' : '']);
         known[f.id] = -1;
       });
@@ -976,6 +982,7 @@ function syncPhotos_(start) {
     if (token) { complete = false; break; }
   }
   if (add.length) sh.getRange(sh.getLastRow() + 1, 1, add.length, PHOTO_COLS.length).setValues(add);
+  fix.forEach(function (x) { sh.getRange(x[0], 3).setValue(x[1]); });
   var removed = 0;
   if (complete) {                                                  // whole tree read: forget photos that are gone
     for (var i = vals.length - 1; i >= 0; i--) if (!seen[vals[i][0]]) { sh.deleteRow(i + 2); removed++; }
