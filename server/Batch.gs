@@ -206,6 +206,7 @@ function processDrop() {
     }
     try { made = made.concat(processLinks_(start)); } catch (e) { Logger.log('Links: ' + e); }
     try { syncPhotos_(Date.now() - 60000); } catch (e) { Logger.log('Photos: ' + e); }
+    try { scanQueue_(90000); } catch (e) { Logger.log('Scan: ' + e); }
   } finally { lock.releaseLock(); }
   try { flushHeaders_(5000); } catch (e) {}
   return made;
@@ -917,11 +918,12 @@ function api_linkTree() {
  * Photos stay where they are in Drive (the "ArNote Photos" folder and everything under it). ArNote keeps only an index
  * in the Photos sheet: tags, inbox/filed, and when each photo was taken. Nothing is copied.
  */
-var PHOTO_COLS = ['fileId', 'name', 'taken', 'mime', 'folder', 'tags', 'status', 'added', 'w', 'h'];
+var PHOTO_COLS = ['fileId', 'name', 'taken', 'mime', 'folder', 'tags', 'status', 'added', 'w', 'h', 'scan'];
 
 function photoSheet_() {
   var sh = ensureSheet_('Photos', PHOTO_COLS);
   if (!props_().getProperty('photoFmt')) { sh.getRange('A:G').setNumberFormat('@'); props_().setProperty('photoFmt', '1'); }   // keep dates/ids as plain text
+  if (sh.getRange(1, PHOTO_COLS.length).getValue() !== 'scan') sh.getRange(1, PHOTO_COLS.length).setValue('scan').setFontWeight('bold');
   return sh;
 }
 
@@ -965,7 +967,8 @@ function syncPhotos_(start) {
         seen[f.id] = 1;
         if (known[f.id] !== undefined) return;
         var md = f.imageMediaMetadata || f.videoMediaMetadata || {};
-        add.push([f.id, f.name, photoTaken_(f), f.mimeType, dir.path, '', '', now, md.width || '', md.height || '']);
+        var tk = photoTaken_(f), recent = tk && (Date.now() - new Date(tk).getTime()) < 60 * 864e5;   // only new photos get read for receipts/cards
+        add.push([f.id, f.name, tk, f.mimeType, dir.path, '', '', now, md.width || '', md.height || '', recent && /^image\//.test(f.mimeType) ? 'q' : '']);
         known[f.id] = -1;
       });
       token = res.nextPageToken || '';
@@ -987,7 +990,7 @@ function photoRows_() {
   var sh = photoSheet_(), v = sh.getDataRange().getValues(); v.shift();
   return v.map(function (r, i) {
     return { id: String(r[0]), name: String(r[1]), taken: r[2] instanceof Date ? r[2].toISOString() : String(r[2]), mime: String(r[3]),
-      folder: String(r[4]), tags: splitTags_(r[5]), status: String(r[6]), w: +r[8] || 0, h: +r[9] || 0, row: i + 2 };
+      folder: String(r[4]), tags: splitTags_(r[5]), status: String(r[6]), w: +r[8] || 0, h: +r[9] || 0, scan: String(r[10] || ''), row: i + 2 };
   });
 }
 
@@ -1020,7 +1023,7 @@ function api_photos(o) {
 function api_photoStats() {
   var rows = photoRows_(), years = {}, tags = {}, ftags = {}, folders = {}, inbox = 0, filed = 0;
   rows.forEach(function (p) {
-    if (p.status === 'filed') filed++; else inbox++;
+    if (p.status === 'filed') filed++; else if (!p.status) inbox++;
     var y = p.taken.slice(0, 4) || '?', m = p.taken.slice(5, 7) || '?';
     years[y] = years[y] || {}; years[y][m] = (years[y][m] || 0) + 1;
     p.tags.forEach(function (t) { tags[t] = (tags[t] || 0) + 1; if (p.status === 'filed') ftags[t] = (ftags[t] || 0) + 1; });
@@ -1120,3 +1123,199 @@ function api_photoMonths(o) {
   var months = Object.keys(m).sort().reverse().map(function (k) { return [k, m[k]]; });
   return { months: months, total: rows.length };
 }
+
+/* ---------------- Receipts, business cards, documents ----------------
+ * New photos are read once with Google Drive's free OCR (a temporary Google Doc, deleted right away).
+ *  - Receipt: vendor, date, total, tax → a note in the Inbox tagged "Receipt" + a row in the Receipts sheet.
+ *  - Business card: person + business → note titled "Name — Business", tagged "Business Card".
+ *  - Document: note tagged "Document" (nothing else is kept).
+ *  - Anything else stays a normal photo.
+ * The note is a linked note pointing at the photo itself, so nothing is copied.
+ */
+var RECEIPT_COLS = ['date', 'vendor', 'total', 'tax', 'card', 'category', 'check', 'noteId', 'fileId', 'photo', 'added'];
+
+function receiptSheet_() {
+  var sh = ensureSheet_('Receipts', RECEIPT_COLS);
+  if (!props_().getProperty('receiptFmt')) { sh.getRange('C:D').setNumberFormat('$#,##0.00'); props_().setProperty('receiptFmt', '1'); }
+  return sh;
+}
+
+/** Text in a photo, via Drive OCR on a 2000px copy (keeps big phone photos fast and within OCR limits). */
+function ocrText_(fileId) {
+  var hdr = { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() };
+  var meta = driveApi_('files/' + fileId + '?supportsAllDrives=true&fields=thumbnailLink,mimeType,size');
+  var blob = null;
+  if (meta.thumbnailLink) {
+    var r = UrlFetchApp.fetch(meta.thumbnailLink.replace(/=s\d+(-c)?$/, '') + '=s2000', { headers: hdr, muteHttpExceptions: true });
+    if (r.getResponseCode() === 200) blob = r.getBlob();
+  }
+  if (!blob) { if (+meta.size > 4 * 1024 * 1024 || !/^image\//.test(meta.mimeType)) return ''; blob = DriveApp.getFileById(fileId).getBlob(); }
+  var b = 'arnote' + Date.now(), head = '--' + b + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' +
+    JSON.stringify({ name: 'ArNote OCR (temporary)', mimeType: 'application/vnd.google-apps.document' }) +
+    '\r\n--' + b + '\r\nContent-Type: ' + (blob.getContentType() || 'image/jpeg') + '\r\n\r\n';
+  var payload = Utilities.newBlob(head).getBytes().concat(blob.getBytes()).concat(Utilities.newBlob('\r\n--' + b + '--').getBytes());
+  var up = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&ocrLanguage=en&fields=id',
+    { method: 'post', contentType: 'multipart/related; boundary=' + b, payload: payload, headers: hdr, muteHttpExceptions: true });
+  if (up.getResponseCode() !== 200) throw new Error('OCR failed (' + up.getResponseCode() + ')');
+  var docId = JSON.parse(up.getContentText()).id;
+  try {
+    var t = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + docId + '/export?mimeType=text/plain', { headers: hdr, muteHttpExceptions: true });
+    return t.getResponseCode() === 200 ? t.getContentText('UTF-8').replace(/^﻿/, '') : '';
+  } finally {
+    UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + docId, { method: 'delete', headers: hdr, muteHttpExceptions: true });
+  }
+}
+
+var MONEY_RE_ = /(?:\$\s?)?(\d{1,3}(?:,\d{3})*|\d+)\.(\d{2})(?!\d)/g;
+function moneyIn_(s) { var out = [], m; MONEY_RE_.lastIndex = 0; while ((m = MONEY_RE_.exec(s))) out.push(+(m[1].replace(/,/g, '') + '.' + m[2])); return out; }
+
+/** Decide what a photo is from its text. */
+function classifyText_(text) {
+  var lines = String(text || '').split(/\r?\n/).map(function (l) { return l.replace(/\s+/g, ' ').trim(); }).filter(String);
+  var all = lines.join('\n'), words = (all.match(/[A-Za-z]{2,}/g) || []).length, prices = moneyIn_(all).length;
+  var rcptWords = (all.match(/\b(sub\s*-?total|total|tax|change|cash|visa|mastercard|master card|amex|discover|debit|credit|balance due|amount due|tender|qty|item)\b/gi) || []).length;
+  var phone = all.match(/\(?\b\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b/), email = all.match(/[\w.+-]+@[\w-]+\.[\w.]+/), web = all.match(/\b(?:www\.)?[\w-]+\.(?:com|net|org|biz|co|us|io)\b/i);
+  if (/\btotal\b/i.test(all) && prices >= 2 && rcptWords >= 2) return { kind: 'receipt', fields: receiptFields_(lines, all) };
+  if (rcptWords >= 4 && prices >= 3) return { kind: 'receipt', fields: receiptFields_(lines, all) };
+  if (lines.length <= 16 && words <= 70 && (phone || email || web) && prices <= 1) return { kind: 'card', fields: cardFields_(lines, email, phone, web) };
+  var inSentences = lines.reduce(function (n, l) { var w = (l.match(/[A-Za-z]{2,}/g) || []).length; return n + (w >= 5 ? w : 0); }, 0);   // pages are full lines/paragraphs; screenshots are scattered words
+  if (words >= 40 && inSentences >= words * 0.6) return { kind: 'document', fields: {} };
+  return { kind: 'photo', fields: {} };
+}
+
+function receiptFields_(lines, all) {
+  var skip = /^(welcome|receipt|sales receipt|customer copy|merchant copy|thank you|store|order|invoice|tel|phone)\b/i;
+  var vendor = '';
+  for (var i = 0; i < Math.min(lines.length, 6) && !vendor; i++) {
+    var l = lines[i];
+    if (skip.test(l) || /\d{3}[-.\s]\d{4}/.test(l) || /^\d/.test(l) || (l.match(/[A-Za-z]/g) || []).length < 3) continue;
+    vendor = l.replace(/[^\w&'.,\- ]/g, '').trim().slice(0, 40);
+  }
+  var date = '', m;
+  if ((m = all.match(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/))) {
+    var y = +m[3]; if (y < 100) y += 2000; if (+m[1] <= 12 && +m[2] <= 31) date = y + '-' + ('0' + m[1]).slice(-2) + '-' + ('0' + m[2]).slice(-2);
+  } else if ((m = all.match(/\b(20\d\d)[\/\-.](\d{1,2})[\/\-.](\d{1,2})\b/))) {
+    date = m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+  } else if ((m = all.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.? (\d{1,2}),? (20\d\d)\b/i))) {
+    var mo = 'janfebmaraprmayjunjulaugsepoctnovdec'.indexOf(m[1].toLowerCase().slice(0, 3)) / 3 + 1;
+    date = m[3] + '-' + ('0' + mo).slice(-2) + '-' + ('0' + m[2]).slice(-2);
+  }
+  var total = null, tax = null;
+  lines.forEach(function (l, i) {
+    var low = l.toLowerCase(), next = lines[i + 1] || '';
+    var amt = moneyIn_(l); if (!amt.length && /total|tax|due/.test(low)) amt = moneyIn_(next).slice(0, 1);
+    if (!amt.length) return;
+    if (/\btax\b/.test(low) && !/before tax|pre-?tax|tax ?id|taxable/.test(low)) tax = amt[amt.length - 1];
+    else if (/(grand total|\btotal\b|amount due|balance due|amount paid)/.test(low) && !/sub\s*-?total|total (tax|savings|discount)|items/.test(low)) {
+      var v = amt[amt.length - 1]; if (total === null || v > total) total = v;
+    }
+  });
+  if (total === null) { var allAmt = moneyIn_(all); if (allAmt.length) total = Math.max.apply(null, allAmt); }
+  var card = (all.match(/(?:x{2,}|\*{2,}|#{2,}|ending in|acct:?)\s*(\d{4})\b/i) || [])[1] || '';
+  return { vendor: vendor, date: date, total: total, tax: tax, card: card, check: (!vendor || !date || total === null) ? 'check' : '' };
+}
+
+function cardFields_(lines, email, phone, web) {
+  var biz = /\b(llc|inc|co\.?|company|corp|corporation|group|services|service|brewing|brewery|supply|construction|restaurant|bank|insurance|realty|farms?|equipment|solutions|associates|partners|studio|shop|store)\b/i;
+  var role = /\b(owner|president|manager|director|sales|ceo|cfo|coo|founder|engineer|representative|rep|account|vp|vice|agent|broker|consultant|technician|partner|chef|brewer)\b/i;
+  var name = '', business = '';
+  lines.forEach(function (l) {
+    if (/[@\d]|www\.|\.com/i.test(l)) return;
+    if (!business && biz.test(l)) { business = l.slice(0, 50); return; }
+    var w = l.split(' ');
+    if (!name && w.length >= 2 && w.length <= 4 && !role.test(l) && !biz.test(l) && w.every(function (x) { return /^[A-Z][a-zA-Z'.\-]*$/.test(x); }))
+      name = l === l.toUpperCase() ? l.toLowerCase().replace(/\b\w/g, function (c) { return c.toUpperCase(); }) : l;
+  });
+  if (!business) {
+    var dom = (email && email[0].split('@')[1]) || (web && web[0].replace(/^www\./i, ''));
+    if (dom && !/gmail|yahoo|hotmail|outlook|aol|icloud/i.test(dom)) business = dom.split('.')[0].replace(/[-_]/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+  }
+  if (!business) { var caps = lines.filter(function (l) { return l !== name && /^[A-Z0-9 &'.\-]{4,}$/.test(l) && /[A-Z]{3}/.test(l); })[0]; if (caps) business = caps; }
+  return { name: name, business: business, email: email ? email[0] : '', phone: phone ? phone[0] : '' };
+}
+
+/** A note in the Inbox that points at the photo (no copy). */
+function photoNote_(fileId, title, tags) {
+  var now = new Date(), id = Utilities.getUuid();
+  ensureTags_(tags);
+  var n = { id: id, title: title, notebook: 'Inbox', tags: tags.join(TAG_SEP), created: now, updated: now, docId: fileId, starred: false,
+    source: 'link', sourceUrl: 'https://drive.google.com/file/d/' + fileId + '/view', author: Session.getEffectiveUser().getEmail(), attachments: 0 };
+  ss_().getSheetByName('Notes').appendRow(noteToRow_(n));
+  return id;
+}
+
+function money_(v) { return v === null || v === undefined || v === '' ? '' : '$' + (+v).toFixed(2); }
+
+/** Read one photo, make the note / receipt row, and mark the photo. Returns what happened. */
+function scanPhoto_(p) {
+  var t0 = Date.now(), text = '', r;
+  try { text = ocrText_(p.id); } catch (e) { return { id: p.id, kind: 'error', error: String(e.message || e), ms: Date.now() - t0 }; }
+  r = classifyText_(text);
+  var out = { id: p.id, name: p.name, kind: r.kind, fields: r.fields, ms: Date.now() - t0, chars: text.length };
+  if (r.kind === 'receipt') {
+    var f = r.fields, d = f.date || String(p.taken).slice(0, 10);
+    out.title = 'Receipt — ' + (f.vendor || 'Unknown vendor') + (f.total !== null ? ' — ' + money_(f.total) : '') + (d ? ' — ' + d : '');
+    out.noteId = photoNote_(p.id, out.title, ['Receipt']);
+    receiptSheet_().appendRow([d, f.vendor, f.total === null ? '' : f.total, f.tax === null ? '' : f.tax, f.card, '', f.check, out.noteId, p.id,
+      'https://drive.google.com/file/d/' + p.id + '/view', new Date().toISOString()]);
+  } else if (r.kind === 'card') {
+    var c = r.fields;
+    out.title = [c.name, c.business].filter(String).join(' — ') || 'Business card';
+    out.noteId = photoNote_(p.id, out.title, ['Business Card']);
+  } else if (r.kind === 'document') {
+    out.title = 'Document — ' + String(p.taken).slice(0, 10);
+    out.noteId = photoNote_(p.id, out.title, ['Document']);
+  }
+  return out;
+}
+
+function setPhotoScan_(results) {
+  var sh = photoSheet_(), v = sh.getDataRange().getValues(), by = {};
+  results.forEach(function (r) { by[r.id] = r; });
+  var col = PHOTO_COLS.indexOf('scan'), st = PHOTO_COLS.indexOf('status');
+  for (var i = 1; i < v.length; i++) {
+    var r = by[v[i][0]]; if (!r) continue;
+    v[i][col] = r.kind === 'error' ? 'q' : r.kind;
+    if (r.noteId) v[i][st] = 'note';                      // now lives in the note Inbox, so it leaves the photo inbox
+  }
+  sh.getRange(1, st + 1, v.length, 1).setValues(v.map(function (x) { return [x[st]]; }));
+  sh.getRange(1, col + 1, v.length, 1).setValues(v.map(function (x) { return [x[col]]; }));
+}
+
+/** From the app: scan the selected photos now (a few per call; the app sends the rest in further calls). */
+function api_scanPhotos(ids) {
+  var start = Date.now(), want = {}, out = [];
+  (ids || []).forEach(function (id) { want[id] = 1; });
+  var rows = photoRows_().filter(function (p) { return want[p.id]; });
+  for (var i = 0; i < rows.length && Date.now() - start < 45000; i++) out.push(scanPhoto_(rows[i]));
+  setPhotoScan_(out);
+  return { results: out, left: rows.length - out.length };
+}
+
+/** Every 15 minutes: scan photos queued by the photo sync (new photos taken in the last 60 days). */
+function scanQueue_(budgetMs) {
+  var start = Date.now(), q = photoRows_().filter(function (p) { return p.scan === 'q'; }), out = [];
+  for (var i = 0; i < q.length && Date.now() - start < budgetMs; i++) out.push(scanPhoto_(q[i]));
+  if (out.length) setPhotoScan_(out);
+  refreshReceiptCategories_();
+  return out.length;
+}
+
+/** Receipts sheet "category" = the note's tags (other than Receipt), so tagging the note in the Inbox fills it in. */
+function refreshReceiptCategories_() {
+  var sh = ss_().getSheetByName('Receipts'); if (!sh || sh.getLastRow() < 2) return;
+  var tags = {}; readTable_('Notes').forEach(function (n) { tags[n.id] = splitTags_(n.tags).filter(function (t) { return t !== 'Receipt' && t.charAt(0) !== '@'; }).join(', '); });
+  var c = RECEIPT_COLS.indexOf('category'), k = RECEIPT_COLS.indexOf('noteId');
+  var rng = sh.getRange(2, 1, sh.getLastRow() - 1, RECEIPT_COLS.length), v = rng.getValues(), out = [], ch = false;
+  v.forEach(function (r) { var t = tags[r[k]]; if (t === undefined) t = r[c]; if (t !== r[c]) ch = true; out.push([t]); });
+  if (ch) sh.getRange(2, c + 1, out.length, 1).setValues(out);
+}
+
+function api_receiptsInfo() {
+  var sh = receiptSheet_(), n = Math.max(0, sh.getLastRow() - 1), y = String(new Date().getFullYear()), thisYear = 0, total = 0;
+  if (n) sh.getRange(2, 1, n, 3).getValues().forEach(function (r) { var d = r[0] instanceof Date ? r[0].toISOString() : String(r[0]); if (d.slice(0, 4) === y) { thisYear++; total += +r[2] || 0; } });
+  return { url: ss_().getUrl() + '#gid=' + sh.getSheetId(), count: n, thisYear: thisYear, totalThisYear: Math.round(total * 100) / 100 };
+}
+
+/** Test only: read a photo and say what it would be, without changing anything. */
+function api_ocrTest(id) { var t0 = Date.now(), text = ocrText_(id), r = classifyText_(text); return { ms: Date.now() - t0, chars: text.length, kind: r.kind, fields: r.fields, sample: text.slice(0, 300) }; }

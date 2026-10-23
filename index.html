@@ -1304,6 +1304,7 @@ function viewSettings(){
     '<h3 style="margin:16px 0 4px;font-size:15px">Add another device</h3>'+
     '<p class="muted" style="margin:0 0 8px;font-size:13px">Open this pairing link on your phone or another computer (email it to yourself). Anyone with this link can open your notes — keep it private.</p>'+
     '<div class="setrow"><button class="btn primary" id="cpPair">Copy pairing link</button>'+(navigator.share?'<button class="btn" id="shPair">Share…</button>':'')+'</div>'+
+    '<h3 style="margin:16px 0 4px;font-size:15px">Receipts</h3><div id="rcpt" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Shared links</h3><div id="sset" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Google accounts</h3><div id="acct" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Linked Drive folders</h3><div id="lfold" class="muted" style="font-size:13px">Loading…</div>'+
@@ -1320,6 +1321,9 @@ function viewSettings(){
     el.innerHTML=(all.length?shareRows(all,true):'<p style="margin:4px 0">None yet. Open a tag and choose <b>Share…</b> to give someone a read-only link to its notes.</p>');
     bindShareRows('#sset',all,drawShares)}).catch(function(){})}
   drawShares();
+  call('api_receiptsInfo').then(function(r){var el=$('#rcpt');if(!el)return;
+    el.innerHTML='<div class="setrow"><span>'+r.thisYear+' receipt'+(r.thisYear===1?'':'s')+' this year · $'+r.totalThisYear.toFixed(2)+' total</span><a class="btn small" target="_blank" href="'+esc(r.url)+'">Open receipts spreadsheet ↗</a></div>'+
+      '<p style="margin:4px 0 0">New phone photos are read automatically. Receipts become notes tagged Receipt: tag them with a category (MSBC, Black Fork, Personal…) and the category fills in on the spreadsheet. For older photos: select them in Photos and press 🧾 Scan.</p>'}).catch(function(){var el=$('#rcpt');if(el)el.textContent='Not set up yet.'});
   call('api_accounts').then(function(ac){var el=$('#acct');if(!el)return;
     el.innerHTML=(ac.length?ac.map(function(a){return '<div class="acrow"><span class="mono">'+esc(a.email)+'</span>'+
       (a.tag?'<button class="chip" data-at="'+esc(a.tag)+'">'+esc(a.tag)+'</button><span>'+a.count+' linked</span><button class="btn small" data-ar="'+esc(a.tag)+'">Rename tag</button>':'<span>not tagged (tag was deleted)</span>')+'</div>'}).join(''):'')+
@@ -1549,7 +1553,7 @@ function phPaint(){
   var recent=(store('recentTags')||[]).filter(function(t){return S.parent.hasOwnProperty(t)}).slice(0,6);
   bar.innerHTML='<div class="phbar"><b>'+n+' selected</b><span class="tagbox"><input id="pbIn" placeholder="Type a tag + Enter" autocomplete="off"><div class="tagsug" id="pbSug"></div></span>'+
     recent.map(function(t){return '<button class="chip" data-rt="'+esc(t)+'">+ '+esc(t)+'</button>'}).join('')+
-    '<button class="btn small" id="pbTag">Tags…</button><button class="btn small primary" id="pbFile">File</button><button class="btn small" id="pbBack">Back to inbox</button><button class="btn small" id="pbClr">Clear</button></div>';
+    '<button class="btn small" id="pbTag">Tags…</button><button class="btn small primary" id="pbFile">File</button><button class="btn small" id="pbScan" title="Read receipts, business cards and documents">🧾 Scan</button><button class="btn small" id="pbBack">Back to inbox</button><button class="btn small" id="pbClr">Clear</button></div>';
   var ids=Object.keys(P.sel);
   tagInput($('#pbIn'),$('#pbSug'),function(t){phUpdate(ids,{addTags:[t]},'Tagged “'+t+'”');rememberTags([t])});
   $$('#phBar [data-rt]').forEach(function(b){b.onclick=function(){var t=b.dataset.rt;phUpdate(ids,{addTags:[t]},'Tagged “'+t+'”');rememberTags([t])}});
@@ -1557,6 +1561,29 @@ function phPaint(){
   $('#pbFile').onclick=function(){phUpdate(ids,{status:'filed'},'Filed')};
   $('#pbBack').onclick=function(){phUpdate(ids,{status:''},'Moved to photo inbox')};
   $('#pbClr').onclick=function(){P.sel={};phPaint()};
+  $('#pbScan').onclick=function(){phScan(ids)};
+}
+/** Read selected photos: receipts, business cards and documents become notes in the Inbox. Shows what was found and how long each took. */
+function phScan(ids){
+  var all=[], left=ids.slice(), kinds={receipt:'🧾 Receipt',card:'👤 Business card',document:'📄 Document',photo:'Photo (no change)',error:'⚠ Could not read'};
+  modal('Scanning '+ids.length+' photo'+(ids.length>1?'s':''),'Reading text with Google Drive. Receipts, business cards and documents go to the note Inbox.','<div id="scl"><p class="muted">Working… about 3–6 seconds per photo.</p></div>','<span class="grow" id="scInfo"></span><button class="btn" id="scC">Close</button>');
+  $('#scC').onclick=closeModal;
+  function draw(){var el=$('#scl');if(!el)return;
+    el.innerHTML=all.map(function(r){var f=r.fields||{},d='';
+      if(r.kind==='receipt')d=esc(f.vendor||'?')+' · '+esc(f.date||'no date')+' · total '+(f.total!=null?'$'+(+f.total).toFixed(2):'?')+' · tax '+(f.tax!=null?'$'+(+f.tax).toFixed(2):'—')+(f.card?' · card '+esc(f.card):'')+(f.check?' <b style="color:var(--warn)">check</b>':'');
+      else if(r.kind==='card')d=esc([f.name,f.business,f.phone,f.email].filter(Boolean).join(' · ')||'name not found');
+      else if(r.kind==='error')d=esc(r.error||'');
+      return '<div class="setrow" style="align-items:flex-start"><img src="'+(P.thumbs[r.id]||phThumbUrl(r.id,160))+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;flex:none">'+
+        '<div style="font-size:13px"><b>'+kinds[r.kind]+'</b> <span class="muted">'+(r.ms/1000).toFixed(1)+'s</span><br>'+(r.title?esc(r.title)+'<br>':'')+'<span class="muted">'+d+'</span></div></div>'}).join('')+
+      (left.length?'<p class="muted">Working… '+left.length+' to go.</p>':'');
+    $('#scInfo').textContent=left.length?'':all.filter(function(r){return r.noteId}).length+' added to the note Inbox';}
+  function next(){ if(!left.length){ load(true).then(function(){refreshInboxCount();if(S.view==='photos'){phStats(true).then(function(){viewPhotos()})}}).catch(function(){}); draw(); return }
+    var chunk=left.splice(0,6);
+    call('api_scanPhotos',chunk).then(function(r){all=all.concat(r.results);
+      var done={};r.results.forEach(function(x){done[x.id]=1}); chunk.forEach(function(id){if(!done[id])left.unshift(id)}); draw(); next()})
+    .catch(function(){draw()});
+  }
+  P.sel={}; phPaint(); next();
 }
 /** A tag box with suggestions (Enter picks the highlighted tag, or creates the typed one). */
 function tagInput(inp,sug,onPick){
