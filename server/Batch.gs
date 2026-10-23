@@ -1000,10 +1000,21 @@ function syncPhotos_(start) {
  */
 function photoDedupe_(budget, dry) {
   var start = Date.now(), rows = photoRows_(), groups = {};
+  var byName = {};
   rows.forEach(function (p) {
-    var m = p.name.match(/^(.*?)(-edited)?(\(\d+\))?(\.[^.]+)$/i); if (!m || !p.taken) return;
-    var k = [p.folder, m[1].toLowerCase(), m[4].toLowerCase(), p.taken, p.w + 'x' + p.h].join('|');
-    (groups[k] = groups[k] || []).push({ p: p, rank: (m[2] ? 0 : 2) + (m[3] ? 1 : 0) });
+    var m = p.name.match(/^(.*)(\.[^.]+)$/); if (!m || !p.taken) return;
+    var stem = m[1], ed = /-edited/i.test(stem), copies = (stem.match(/\(\d+\)/g) || []).length;
+    var base = stem.replace(/-edited/ig, '').replace(/\(\d+\)/g, '').toLowerCase();      // x(0)-edited(1)(1) → x
+    var k = [p.folder, base, m[2].toLowerCase()].join('|');
+    (byName[k] = byName[k] || []).push({ p: p, ed: ed, rank: (ed ? 0 : 2) * 10 + copies });
+  });
+  Object.keys(byName).forEach(function (k) {
+    var g = byName[k];
+    if (g.some(function (x) { return x.ed; })) { groups[k] = g; return; }       // "-edited" means an edit of this shot, even if rotated or cropped
+    g.forEach(function (x) {                                                 // plain copies: only when time taken and shape also match
+      var k2 = k + '|' + x.p.taken + '|' + [x.p.w, x.p.h].sort().join('x');
+      (groups[k2] = groups[k2] || []).push(x);
+    });
   });
   var drop = [], keepTags = {}, nGroups = 0;
   Object.keys(groups).forEach(function (k) {
