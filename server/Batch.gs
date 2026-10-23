@@ -1184,7 +1184,7 @@ function classifyText_(text) {
 }
 
 function receiptFields_(lines, all) {
-  var skip = /^(welcome|receipt|sales receipt|customer copy|merchant copy|thank you|store|order|invoice|tel|phone)\b/i;
+  var skip = /^(welcome|receipt|sales receipt|customer copy|merchant copy|thank|you|store|order|invoice|tel|phone|server|table|guests?|cashier|date|time|expect|visit|www)\b/i;
   var vendor = '';
   for (var i = 0; i < Math.min(lines.length, 6) && !vendor; i++) {
     var l = lines[i];
@@ -1200,38 +1200,83 @@ function receiptFields_(lines, all) {
     var mo = 'janfebmaraprmayjunjulaugsepoctnovdec'.indexOf(m[1].toLowerCase().slice(0, 3)) / 3 + 1;
     date = m[3] + '-' + ('0' + mo).slice(-2) + '-' + ('0' + m[2]).slice(-2);
   }
+  var isTax = function (low) { return /\btax\b/.test(low) && !/before tax|pre-?tax|tax ?id|taxable|tax ?exempt/.test(low); };
+  var isTotal = function (low) { return /(grand total|\btotal\b|amount due|balance due|amount paid)/.test(low) && !/sub\s*-?total|total (tax|savings|discount|items?)|items/.test(low); };
   var total = null, tax = null;
+  // labels and amounts on the same line (or the amount on the next line)
   lines.forEach(function (l, i) {
-    var low = l.toLowerCase(), next = lines[i + 1] || '';
-    var amt = moneyIn_(l); if (!amt.length && /total|tax|due/.test(low)) amt = moneyIn_(next).slice(0, 1);
+    var low = l.toLowerCase().replace(/\bon \$?\d[\d,]*\.\d{2}/, ''), next = lines[i + 1] || '';   // "TAX 6% on $41.94" — that's the base, not the tax
+    var amt = moneyIn_(low); if (!amt.length && (isTax(low) || isTotal(low)) && !/[a-z]{3}/i.test(next)) amt = moneyIn_(next).slice(0, 1);
     if (!amt.length) return;
-    if (/\btax\b/.test(low) && !/before tax|pre-?tax|tax ?id|taxable/.test(low)) tax = amt[amt.length - 1];
-    else if (/(grand total|\btotal\b|amount due|balance due|amount paid)/.test(low) && !/sub\s*-?total|total (tax|savings|discount)|items/.test(low)) {
-      var v = amt[amt.length - 1]; if (total === null || v > total) total = v;
-    }
+    if (isTax(low)) tax = amt[amt.length - 1];
+    else if (isTotal(low)) { var v = amt[amt.length - 1]; if (total === null || v > total) total = v; }
   });
+  // labels in one column and amounts in another (restaurant slips): match them up from the bottom
+  if (total === null || tax === null) {
+    for (var s = 0; s < lines.length; s++) {
+      var labels = [];
+      while (s < lines.length && !moneyIn_(lines[s]).length && /(total|tax|due|tip|gratuity|discount|change|cash|balance)/i.test(lines[s])) labels.push(lines[s++].toLowerCase());
+      if (labels.length < 2) continue;
+      var amts = [];
+      for (var j = s; j < lines.length && /^\$?\s?[\d,]+\.\d{2}$/.test(lines[j].replace(/\s/g, '')); j++) amts.push(moneyIn_(lines[j])[0]);
+      if (amts.length < labels.length) continue;
+      var off = amts.length - labels.length;
+      labels.forEach(function (lab, k) { var v = amts[off + k];
+        if (tax === null && isTax(lab)) tax = v;
+        if (isTotal(lab) && (total === null || v > total)) total = v; });
+      break;
+    }
+  }
   if (total === null) { var allAmt = moneyIn_(all); if (allAmt.length) total = Math.max.apply(null, allAmt); }
-  var card = (all.match(/(?:x{2,}|\*{2,}|#{2,}|ending in|acct:?)\s*(\d{4})\b/i) || [])[1] || '';
+  var card = (all.match(/(?:x{2,}|\*+|#{2,}|ending in|acct:?)\s*(\d{4})\b/i) || all.match(/\b(\d{4})\s+(?:visa|mc|mastercard|amex|discover|debit)\b/i) || [])[1] || '';
   return { vendor: vendor, date: date, total: total, tax: tax, card: card, check: (!vendor || !date || total === null) ? 'check' : '' };
 }
 
 function cardFields_(lines, email, phone, web) {
-  var biz = /\b(llc|inc|co\.?|company|corp|corporation|group|services|service|brewing|brewery|supply|construction|restaurant|bank|insurance|realty|farms?|equipment|solutions|associates|partners|studio|shop|store)\b/i;
-  var role = /\b(owner|president|manager|director|sales|ceo|cfo|coo|founder|engineer|representative|rep|account|vp|vice|agent|broker|consultant|technician|partner|chef|brewer)\b/i;
-  var name = '', business = '';
-  lines.forEach(function (l) {
-    if (/[@\d]|www\.|\.com/i.test(l)) return;
-    if (!business && biz.test(l)) { business = l.slice(0, 50); return; }
-    var w = l.split(' ');
-    if (!name && w.length >= 2 && w.length <= 4 && !role.test(l) && !biz.test(l) && w.every(function (x) { return /^[A-Z][a-zA-Z'.\-]*$/.test(x); }))
-      name = l === l.toUpperCase() ? l.toLowerCase().replace(/\b\w/g, function (c) { return c.toUpperCase(); }) : l;
-  });
-  if (!business) {
-    var dom = (email && email[0].split('@')[1]) || (web && web[0].replace(/^www\./i, ''));
-    if (dom && !/gmail|yahoo|hotmail|outlook|aol|icloud/i.test(dom)) business = dom.split('.')[0].replace(/[-_]/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+  var biz = /\b(llc|l\.l\.c|inc|co\.?|company|corp|corporation|group|services|service|brewing|brewery|distillery|winery|supply|construction|restaurant|bank|insurance|realty|farms?|equipment|solutions|associates|partners|studio|shop|store|systems|technologies|industries|international|office|department|division|development|university|college|school|county|agency|association|council|foundation|church|hospital|clinic|center|centre|distributing|distributors?|manufacturing|engineering|enterprises|ltd)\b/i;
+  var role = /\b(owner|president|manager|director|sales|ceo|cfo|coo|cto|founder|engineer|representative|rep|account|vp|vice|agent|broker|consultant|technician|partner|chef|brewer|officer|inspector|specialist|coordinator|executive|assistant|supervisor|administrator|analyst|general|head|lead|senior|chief)\b/i;
+  var stop = /^(cell|mobile|phone|tel|fax|email|e-mail|office|direct|www|web)\b/i;
+  var local = email ? email[0].split('@')[0].toLowerCase().replace(/[^a-z]/g, ' ') : '', ltoks = local.split(' ').filter(function (t) { return t.length >= 3; }), lflat = local.replace(/ /g, '');
+  function tidy(s) { return s === s.toUpperCase() || s === s.toLowerCase() ? s.toLowerCase().replace(/(^|[\s\-&\/])(\w)/g, function (m, a, c) { return a + c.toUpperCase(); }).replace(/\b(Of|And|The|For)\b/g, function (w) { return w.toLowerCase(); }).replace(/^\w/, function (c) { return c.toUpperCase(); }) : s; }
+  // the leading run of name-like words in a line ("DANA WHITE Compliance Officer" → "DANA WHITE")
+  function leadName(l) {
+    var w = l.replace(/,.*$/, '').split(' '), out = [];
+    for (var i = 0; i < w.length && out.length < 4; i++) {
+      var x = w[i];
+      if (!/^[A-Z][A-Za-z'.\-]*$/.test(x) || role.test(x) || biz.test(x) || stop.test(x)) break;
+      if (out.length && (out[0] === out[0].toUpperCase()) !== (x === x.toUpperCase()) && x.length > 2) break;   // "DANA WHITE Compliance…": the name ends where the lettering changes
+      out.push(x);
+    }
+    while (out.length && /^[A-Z]\.?$/.test(out[out.length - 1]) && out.length > 2) out.pop();   // stray trailing initial
+    return out.length >= 2 ? out.join(' ') : '';
   }
-  if (!business) { var caps = lines.filter(function (l) { return l !== name && /^[A-Z0-9 &'.\-]{4,}$/.test(l) && /[A-Z]{3}/.test(l); })[0]; if (caps) business = caps; }
-  return { name: name, business: business, email: email ? email[0] : '', phone: phone ? phone[0] : '' };
+  var name = '';
+  if (lflat.length >= 3) {        // best clue: the line that matches the email (kevin.klaum@ → "Kevin Klaum", shall@ → "Steven Hall")
+    lines.some(function (l) {
+      var n = leadName(l); if (!n) return false;
+      var ws = n.toLowerCase().replace(/[^a-z ]/g, '').split(' ').filter(function (x) { return x.length >= 3; });
+      var hit = ws.some(function (x) { return lflat.indexOf(x) >= 0 || ltoks.indexOf(x) >= 0; });
+      if (hit) name = n; return hit;
+    });
+  }
+  if (!name) lines.some(function (l) { if (/[@]|www\./i.test(l) || biz.test(l.split(' ').slice(0, 3).join(' '))) return false; var n = leadName(l); if (n && n.split(' ').length <= 4) name = n; return !!name; });
+  var business = '';
+  var dom = (email && email[0].split('@')[1]) || (web && web[0].replace(/^www\./i, '')) || '';
+  var stem = /gmail|yahoo|hotmail|outlook|aol|icloud|comcast|verizon|126\.com|163\.com/i.test(dom) ? '' : dom.split('.')[0].toLowerCase().replace(/[^a-z]/g, '');
+  if (stem.length >= 4) {         // a line that spells the email/website domain ("georgfischer" → "Georg Fischer LLC")
+    var best = '';
+    lines.forEach(function (l) {
+      if (/@|www\.|https?:|\d/i.test(l)) return;
+      var flat = l.toLowerCase().replace(/[^a-z]/g, '');
+      if (flat.length >= 4 && (flat.indexOf(stem) >= 0 || stem.indexOf(flat) >= 0 || flat.indexOf(stem.slice(0, 4)) >= 0) && flat.length > best.replace(/[^a-z]/gi, '').length) best = l;
+    });
+    business = best;
+  }
+  if (!business) lines.some(function (l) { if (/@|www\.|\d/.test(l) || (name && l.indexOf(name) >= 0)) return false; if (biz.test(l)) business = l; return !!business; });
+  if (!business && stem) business = stem.replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+  business = tidy(business.replace(/[^\x20-\x7E]+.*$/, '').replace(/\s+/g, ' ').trim());
+  if (business.length > 50) business = business.slice(0, 50).replace(/\s+\S*$/, '');
+  return { name: tidy(name), business: business, email: email ? email[0] : '', phone: phone ? phone[0] : '' };
 }
 
 /** A note in the Inbox that points at the photo (no copy). */
@@ -1318,4 +1363,4 @@ function api_receiptsInfo() {
 }
 
 /** Test only: read a photo and say what it would be, without changing anything. */
-function api_ocrTest(id) { var t0 = Date.now(), text = ocrText_(id), r = classifyText_(text); return { ms: Date.now() - t0, chars: text.length, kind: r.kind, fields: r.fields, sample: text.slice(0, 300) }; }
+function api_ocrTest(id) { var t0 = Date.now(), text = ocrText_(id), r = classifyText_(text); return { ms: Date.now() - t0, chars: text.length, kind: r.kind, fields: r.fields, sample: text.slice(0, 5000) }; }
