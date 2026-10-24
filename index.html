@@ -479,6 +479,7 @@ function bindRows(ids,onOpen){
 }
 function endSelect(){S.sel={};lastClicked=null;paintSel()}
 function paintSel(){
+  if(!G) Object.keys(S.sel).forEach(function(id){if(!S.byId[id])delete S.sel[id]});   // deleted notes leave the selection
   var n=Object.keys(S.sel).length; if(G){guestPaint();}
   $$('.row[data-id]').forEach(function(r){var on=!!S.sel[r.dataset.id];r.classList.toggle('sel',on);var c=r.querySelector('.cb');if(c)c.checked=on});
   $('#actbar').classList.toggle('on',n>0); document.body.classList.toggle('selmode',n>0);
@@ -571,6 +572,7 @@ S.pendingTrash=[];
 function trashLater(ids,msg){
   var gone=ids.map(function(id){return S.byId[id]}).filter(Boolean); if(!gone.length) return;
   gone.forEach(function(n){delete S.byId[n.id]}); S.notes=S.notes.filter(function(n){return S.byId[n.id]});
+  if(S.listIds) S.listIds=S.listIds.filter(function(id){return S.byId[id]}); paintSel();
   var job={ids:gone.map(function(n){return n.id}),done:false}; S.pendingTrash.push(job);
   function commit(){if(job.done)return;job.done=true;S.pendingTrash=S.pendingTrash.filter(function(j){return j!==job});
     call('api_batchTrash',job.ids).catch(function(){})}
