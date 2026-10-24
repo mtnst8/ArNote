@@ -1,7 +1,7 @@
 {
   "name": "ArNote",
   "short_name": "ArNote",
-  "description": "Simple notes kept in your own Google Drive",
+  "description": "Tag — you're it. Notes and photos kept in your own Google Drive",
   "id": "./",
   "start_url": "./",
   "scope": "./",

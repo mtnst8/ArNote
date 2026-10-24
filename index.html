@@ -259,6 +259,9 @@ nav button svg{display:none}
 .pin .reader{height:260px}
 .pair{max-width:520px;margin:40px auto;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px}
 .pair h1{margin:0 0 6px;font-size:24px;color:var(--acc)}
+.pair .tagline{display:block;margin:-4px 0 10px;font-size:14px}
+.tagline{display:block;font-size:12px;font-weight:500;font-style:italic;letter-spacing:.2px;color:var(--ink);opacity:.55}
+@media (max-width:700px){.brand .tagline{display:none}}
 .pair label{display:block;font-size:13px;color:var(--mute);margin:12px 0 4px}
 .pair .err{color:var(--warn);font-size:13px;min-height:18px;margin-top:8px}
 .setrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}
@@ -277,7 +280,7 @@ body.guest #actbar,body.guest .row .nb{display:none!important}
 <body>
 <aside id="side">
 <header>
-  <span class="brand" onclick="go('home')">ArNote</span>
+  <span class="brand" onclick="go('home')">ArNote<small class="tagline">Tag — you're it.</small></span>
   <input id="q" type="search" placeholder="Search notes" title="Tips: #tag to filter by tag, in:inbox or in:cabinet" autocomplete="off">
   <button class="cambtn" id="camBtn" aria-label="Add photos" title="Take or choose photos"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.6"/></svg></button>
   <input type="file" id="camIn" accept="image/*" multiple hidden>
@@ -1837,7 +1840,7 @@ function parsePair(s){
 }
 function showPair(msg){
   document.body.classList.add('unpaired');
-  $('#main').innerHTML='<div class="pair"><h1>ArNote</h1><p class="muted" style="margin:0">Connect this device to your notes.</p>'+
+  $('#main').innerHTML='<div class="pair"><h1>ArNote</h1><span class="tagline">Tag — you\'re it.</span><p class="muted" style="margin:0">Connect this device to your notes.</p>'+
     '<label>Paste your pairing link</label><input class="field" id="plink" placeholder="https://…#pair=…" autocomplete="off">'+
     '<details style="margin-top:10px"><summary class="muted" style="cursor:pointer;font-size:13px">Or enter server address and key</summary>'+
     '<label>Server address (Apps Script web app URL)</label><input class="field" id="papi" placeholder="https://script.google.com/macros/s/…/exec">'+
