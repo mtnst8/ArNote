@@ -1099,7 +1099,8 @@ function photoRows_() {
   });
 }
 
-function tagSet_(tag) {
+function tagSet_(tag, exact) {
+  if (exact) { var one = {}; one[tag] = 1; return one; }          // just this tag, not its sub-tags
   var kids = {}; readTable_('Tags').forEach(function (t) { var p = String(t.parent || ''); (kids[p] = kids[p] || []).push(String(t.name)); });
   var set = {}; (function walk(x) { set[x] = 1; (kids[x] || []).forEach(walk); })(tag);
   return set;
@@ -1108,7 +1109,7 @@ function tagSet_(tag) {
 /** One page of photos. o: {view: 'inbox'|'filed'|'all', tag, year, month, folder, offset, limit} */
 function api_photos(o) {
   o = o || {};
-  var rows = photoRows_(), set = o.tag ? tagSet_(o.tag) : null;
+  var rows = photoRows_(), set = o.tag ? tagSet_(o.tag, o.exact) : null;
   var list = rows.filter(function (p) {
     if (o.view === 'inbox' && p.status) return false;
     if (o.view === 'filed' && p.status !== 'filed') return false;
@@ -1217,7 +1218,7 @@ function retagPhotos_(fn) {
 /** Timeline for the Photos grid: how many photos per month (newest first) for the same filters as api_photos. */
 function api_photoMonths(o) {
   o = o || {};
-  var rows = photoRows_(), set = o.tag ? tagSet_(o.tag) : null, m = {};
+  var rows = photoRows_(), set = o.tag ? tagSet_(o.tag, o.exact) : null, m = {};
   rows.forEach(function (p) {
     if (o.view === 'inbox' && p.status) return;
     if (o.view === 'filed' && p.status !== 'filed') return;
