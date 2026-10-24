@@ -1285,7 +1285,10 @@ function classifyText_(text) {
   var phone = all.match(/\(?\b\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b/), email = all.match(/[\w.+-]+@[\w-]+\.[\w.]+/), web = all.match(/\b(?:www\.)?[\w-]+\.(?:com|net|org|biz|co|us|io)\b/i);
   if (/\btotal\b/i.test(all) && prices >= 2 && rcptWords >= 2) return { kind: 'receipt', fields: receiptFields_(lines, all) };
   if (rcptWords >= 4 && prices >= 3) return { kind: 'receipt', fields: receiptFields_(lines, all) };
-  if (lines.length <= 16 && words <= 70 && (phone || email || web) && prices <= 1) return { kind: 'card', fields: cardFields_(lines, email, phone, web) };
+  if (lines.length <= 16 && words <= 70 && (phone || email) && prices <= 1) {     // a card has a phone or email AND a person's name (or both phone and email); a website alone is a sign, not a card
+    var cf = cardFields_(lines, email, phone, web);
+    if (cf.name || (phone && email)) return { kind: 'card', fields: cf };
+  }
   var inSentences = lines.reduce(function (n, l) { var w = (l.match(/[A-Za-z]{2,}/g) || []).length; return n + (w >= 5 ? w : 0); }, 0);   // pages are full lines/paragraphs; screenshots are scattered words
   if (words >= 40 && inSentences >= words * 0.6) return { kind: 'document', fields: {} };
   return { kind: 'photo', fields: {} };
