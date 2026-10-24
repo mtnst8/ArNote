@@ -369,13 +369,14 @@ function nvPut(id,v){noteCache[id]=v; if(G) return;
   }catch(e){}}
 function nvFetch(id){
   if(nvPending[id]) return nvPending[id];
-  var p=call('api_noteView',id).then(function(v){v._t=Date.now();nvPut(id,v);delete nvPending[id];return v},function(e){delete nvPending[id];throw e});
+  var p=call('api_noteView',id).then(function(v){v._t=Date.now();nvPut(id,v);delete nvPending[id];var u=photoSrc(v);if(u){var im=new Image();im.src=u}return v},function(e){delete nvPending[id];throw e});
   return nvPending[id]=p;
 }
-/** Quietly load the next few notes so they're ready when you get to them. */
-function prefetchNotes(ids){
+function photoSrc(v){return v&&v.photo?((String(v.html).match(/src="(https:\/\/drive\.google\.com\/thumbnail[^"]*)"/)||[])[1]||'').replace(/&amp;/g,'&'):''}
+/** Quietly load notes ahead of time so they open instantly (a few at a time, or a whole list when asked). */
+function prefetchNotes(ids,max){
   if(G||!CFG) return;
-  ids=(ids||[]).filter(function(id){return id&&S.byId[id]&&!nvGet(id)}).slice(0,3);
+  ids=(ids||[]).filter(function(id){return id&&S.byId[id]&&!nvGet(id)}).slice(0,max||3);
   ids.reduce(function(p,id){return p.then(function(){return nvGet(id)?null:nvFetch(id).catch(function(){})})},Promise.resolve());
 }
 function fillReader(frame,id,fresh){
@@ -385,7 +386,9 @@ function fillReader(frame,id,fresh){
     h=/<head[^>]*>/i.test(h)?h.replace(/<head[^>]*>/i,function(m){return m+extra}):extra+h;
     // Chrome doesn't always redraw when srcdoc changes on an existing frame, so swap in a fresh one
     var nf=frame.cloneNode(false); nf.removeAttribute('srcdoc'); nf.srcdoc=h;
-    if(frame.isConnected) frame.replaceWith(nf); frame=nf;}
+    if(frame.isConnected) frame.replaceWith(nf); frame=nf;
+    var u=photoSrc(v); if(u&&!v._fb){var t=new Image();t.onerror=function(){        // browser not signed in to Drive: get the picture through the server instead
+      call('api_photoView',v.photo).then(function(r){if(!r||!r.src||!frame.isConnected)return;var v2={};for(var k in v)v2[k]=v[k];v2._fb=1;v2.html=String(v.html).split(u).join(r.src).replace(/src="https:\/\/drive\.google\.com\/thumbnail[^"]*"/,'src="'+r.src+'"');put(v2)}).catch(function(){})};t.src=u}}
   var c=nvGet(id);
   if(c){ put(c);
     // show the saved copy now; check for changes in the background (always when asked, otherwise if it's over 2 minutes old)
@@ -823,6 +826,7 @@ function viewInboxSplit(){
   $('#main').innerHTML='<div class="split"><div class="lcol" id="lcol"></div><div class="pcol" id="pv"></div></div>';
   var inbox=inboxList(); if(!S.pv||!S.byId[S.pv]||S.byId[S.pv].notebook!=='Inbox') S.pv=inbox.length?inbox[0].id:null;
   drawInboxList(); renderPv();
+  setTimeout(function(){prefetchNotes(inbox.map(function(n){return n.id}),40)},1200);   // get every Inbox note ready in the background
 }
 function drawInboxList(){
   var inbox=inboxList(); S.pvOrder=inbox.map(function(n){return n.id});
@@ -1027,6 +1031,7 @@ function viewInbox(){
   var inbox=byRecent(S.notes.filter(function(n){return n.notebook==='Inbox'}));
   $('#main').innerHTML=upBar()+(inbox.length?'<div class="bar" style="margin-top:12px"><button class="btn primary" id="triage">Process one by one</button></div>':'')+section('Inbox ('+inbox.length+')',inbox,'Inbox is empty. Nice.');
   bindRows(); bindUp();
+  setTimeout(function(){prefetchNotes(inbox.map(function(n){return n.id}),40)},1200);
   if($('#triage')) $('#triage').onclick=function(){S.triage=inbox.map(function(n){return n.id});S.view='note';viewNote(S.triage[0])};
 }
 

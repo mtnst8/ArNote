@@ -423,12 +423,14 @@ function api_appInfo() {
 }
 
 /** Note body as clean HTML for the app's reading view (header line removed), plus attachments. */
-function api_noteView(id) {
+function api_noteView(id, o) {
   var n = readTable_('Notes').filter(function (x) { return x.id === id; })[0];
   if (!n) throw new Error('Note not found');
   if (n.source === 'link') {
     var meta = driveMeta_(n.docId);
     if (!meta) return { html: '<p style="font:14px sans-serif">This linked file is missing or no longer shared with you.</p>', atts: [], docId: n.docId, link: { url: n.sourceUrl } };
+    if (/^image\//.test(meta.mimeType) && !(o && o.embed))      // photos load straight from Drive in the app (fast, cached); the app falls back to api_photoView
+      return { html: photoPreviewHtml_(n.docId, meta), photo: n.docId, atts: [], docId: n.docId, link: { url: meta.webViewLink || n.sourceUrl, mime: meta.mimeType, name: meta.name }, loc: linkLocation_(n.docId) };
     if (meta.mimeType !== 'application/vnd.google-apps.document')
       return { html: linkedPreviewHtml_(n.docId, meta), atts: [], docId: n.docId, link: { url: meta.webViewLink || n.sourceUrl, mime: meta.mimeType, name: meta.name }, loc: linkLocation_(n.docId) };
   }
@@ -578,6 +580,12 @@ function driveMeta_(id) {
 }
 
 /** Reading-view HTML for a linked file that isn't a Google Doc: the picture itself, or a large page-1 preview. */
+function photoPreviewHtml_(id, meta) {
+  var src = 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(id) + '&sz=w1600&authuser=' + encodeURIComponent(Session.getEffectiveUser().getEmail());
+  return '<html><body style="font:14px sans-serif;color:#444;text-align:center"><img src="' + src + '" style="max-width:100%;box-shadow:0 1px 6px rgba(0,0,0,.25)">' +
+    '<p style="color:#888;font-size:12px">' + String(meta.name || '').replace(/[<>&"]/g, '') + '</p></body></html>';
+}
+
 function linkedPreviewHtml_(id, meta) {
   var src = '';
   try {
@@ -825,7 +833,7 @@ function shareDispatch_(token, fn, a) {
   });
   if (fn === 'share_view') {
     if (!inScope(a[0])) throw new Error('Not part of this shared list');
-    var v = api_noteView(a[0]);
+    var v = api_noteView(a[0], { embed: true });   // guests aren't signed in to Drive: send the picture itself
     return { html: v.html, atts: (v.atts || []).map(function (x) { return { fileId: x.fileId, filename: x.filename, bytes: x.bytes, mime: x.mime }; }) };
   }
   if (fn === 'share_print') return api_printPdf((a[0] || []).filter(inScope));
