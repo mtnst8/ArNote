@@ -975,7 +975,7 @@ function syncPhotos_(start) {
         }
         var md = f.imageMediaMetadata || f.videoMediaMetadata || {};
         var tk = photoTaken_(f, dir.path), recent = tk && (Date.now() - new Date(tk).getTime()) < 60 * 864e5;   // only new photos get read for receipts/cards
-        add.push([f.id, f.name, tk, f.mimeType, dir.path, '', '', now, md.width || '', md.height || '', recent && /^image\//.test(f.mimeType) ? 'q' : '']);
+        add.push([f.id, f.name, tk, f.mimeType, dir.path, /^video\//.test(f.mimeType) ? VIDEO_TAG : '', '', now, md.width || '', md.height || '', recent && /^image\//.test(f.mimeType) ? 'q' : '']);
         known[f.id] = -1;
       });
       token = res.nextPageToken || '';
@@ -1030,24 +1030,56 @@ function photoDedupe_(budget, dry) {
     if (tags.length !== keep.tags.length || status !== keep.status) keepTags[keep.id] = { tags: tags, status: status };
   });
   if (dry || !drop.length) return { groups: nGroups, extra: drop.length, trashed: 0, left: drop.length };
-  var gone = {}, tok = ScriptApp.getOAuthToken(), n = 0;
-  for (var i = 0; i < drop.length && Date.now() - start < budget; i += 20) {
-    var reqs = drop.slice(i, i + 20).map(function (id) {
-      return { url: 'https://www.googleapis.com/drive/v3/files/' + id + '?supportsAllDrives=true', method: 'patch', contentType: 'application/json',
+  var gone = trashFiles_(drop, budget - (Date.now() - start)), n = Object.keys(gone).length;
+  dropPhotoRows_(gone, keepTags);
+  return { groups: nGroups, extra: drop.length, trashed: n, left: drop.length - n };
+}
+
+/** Move Drive files to the trash (restorable for 30 days), 20 at a time. Returns {id:1} for the ones done (or already gone). */
+function trashFiles_(ids, budget) {
+  var start = Date.now(), gone = {}, tok = ScriptApp.getOAuthToken();
+  for (var i = 0; i < ids.length && Date.now() - start < budget; i += 20) {
+    var part = ids.slice(i, i + 20);
+    UrlFetchApp.fetchAll(part.map(function (id) {
+      return { url: 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id) + '?supportsAllDrives=true', method: 'patch', contentType: 'application/json',
         payload: JSON.stringify({ trashed: true }), headers: { Authorization: 'Bearer ' + tok }, muteHttpExceptions: true };
-    });
-    UrlFetchApp.fetchAll(reqs).forEach(function (r, j) { var c = r.getResponseCode(); if (c === 200 || c === 404) { gone[drop[i + j]] = 1; n++; } });
+    })).forEach(function (r, j) { var c = r.getResponseCode(); if (c === 200 || c === 404) gone[part[j]] = 1; });
   }
-  var sh = photoSheet_(), v = sh.getDataRange().getValues(), head = v.shift();
+  return gone;
+}
+
+/** Rewrite the Photos sheet without the given photos (and with any merged tags on the ones kept). */
+function dropPhotoRows_(gone, keepTags) {
+  keepTags = keepTags || {};
+  if (!Object.keys(gone).length && !Object.keys(keepTags).length) return;
+  var sh = photoSheet_(), v = sh.getDataRange().getValues(), head = v.shift(); if (!v.length) return;
   var out = v.filter(function (r) { return !gone[r[0]]; }).map(function (r) {
     var kt = keepTags[r[0]]; if (kt) { r[5] = kt.tags.join(TAG_SEP); r[6] = kt.status; }
     return r;
   });
-  if (n || Object.keys(keepTags).length) {
-    sh.getRange(2, 1, v.length, head.length).clearContent();
-    if (out.length) sh.getRange(2, 1, out.length, head.length).setValues(out);
-  }
-  return { groups: nGroups, extra: drop.length, trashed: n, left: drop.length - n };
+  sh.getRange(2, 1, v.length, head.length).clearContent();
+  if (out.length) sh.getRange(2, 1, out.length, head.length).setValues(out);
+}
+
+/** Delete photos from the app: files go to Drive trash, rows leave the index. Only files in the Photos index can be deleted. */
+function api_photoDelete(ids) {
+  var known = {}; photoRows_().forEach(function (p) { known[p.id] = 1; });
+  ids = (ids || []).map(String).filter(function (id) { return known[id]; });
+  if (!ids.length) return { deleted: 0 };
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try { var gone = trashFiles_(ids, 240000); dropPhotoRows_(gone); return { deleted: Object.keys(gone).length, failed: ids.length - Object.keys(gone).length }; }
+  finally { lock.releaseLock(); }
+}
+
+/** Videos get the "Videos" tag (new ones on sync; this catches up the ones already indexed). */
+var VIDEO_TAG = 'Videos';
+function api_photoTagVideos() {
+  ensureTags_([VIDEO_TAG]);
+  var sh = photoSheet_(); if (sh.getLastRow() < 2) return 0;
+  var rng = sh.getRange(2, 1, sh.getLastRow() - 1, 6), v = rng.getValues(), n = 0;
+  v.forEach(function (r) { var t = splitTags_(r[5]); if (/^video\//.test(r[3]) && t.indexOf(VIDEO_TAG) < 0) { t.push(VIDEO_TAG); r[5] = t.join(TAG_SEP); n++; } });
+  if (n) sh.getRange(2, 6, v.length, 1).setValues(v.map(function (r) { return [r[5]]; }));
+  return n;
 }
 
 function api_photoDedupe(dry) {          // the 15-minute sync holds the same lock while it rewrites the Photos sheet

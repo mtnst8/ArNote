@@ -1553,7 +1553,7 @@ function phPaint(){
   var recent=(store('recentTags')||[]).filter(function(t){return S.parent.hasOwnProperty(t)}).slice(0,6);
   bar.innerHTML='<div class="phbar"><b>'+n+' selected</b><span class="tagbox"><input id="pbIn" placeholder="Type a tag + Enter" autocomplete="off"><div class="tagsug" id="pbSug"></div></span>'+
     recent.map(function(t){return '<button class="chip" data-rt="'+esc(t)+'">+ '+esc(t)+'</button>'}).join('')+
-    '<button class="btn small" id="pbTag">Tags…</button><button class="btn small primary" id="pbFile">File</button><button class="btn small" id="pbScan" title="Read receipts, business cards and documents">🧾 Scan</button><button class="btn small" id="pbBack">Back to inbox</button><button class="btn small" id="pbClr">Clear</button></div>';
+    '<button class="btn small" id="pbTag">Tags…</button><button class="btn small primary" id="pbFile">File</button><button class="btn small" id="pbScan" title="Read receipts, business cards and documents">🧾 Scan</button><button class="btn small" id="pbBack">Back to inbox</button><button class="btn small" id="pbDel" title="Move to Drive trash (Undo for a few seconds)">🗑 Delete</button><button class="btn small" id="pbClr">Clear</button></div>';
   var ids=Object.keys(P.sel);
   tagInput($('#pbIn'),$('#pbSug'),function(t){phUpdate(ids,{addTags:[t]},'Tagged “'+t+'”');rememberTags([t])});
   $$('#phBar [data-rt]').forEach(function(b){b.onclick=function(){var t=b.dataset.rt;phUpdate(ids,{addTags:[t]},'Tagged “'+t+'”');rememberTags([t])}});
@@ -1562,6 +1562,7 @@ function phPaint(){
   $('#pbBack').onclick=function(){phUpdate(ids,{status:''},'Moved to photo inbox')};
   $('#pbClr').onclick=function(){P.sel={};phPaint()};
   $('#pbScan').onclick=function(){phScan(ids)};
+  $('#pbDel').onclick=function(){phDelete(ids)};
 }
 /** Read selected photos: receipts, business cards and documents become notes in the Inbox. Shows what was found and how long each took. */
 function phScan(ids){
@@ -1664,12 +1665,28 @@ function phRedraw(ids){
     var keep=!(q.view==='inbox'&&p.status)&&!(q.view==='filed'&&p.status!=='filed')&&!(set&&!p.tags.some(function(g){return set[g]}));
     $$('#phTL .pc[data-id="'+id+'"], #cabPh .pc[data-id="'+id+'"]').forEach(function(c){
       var ps=c.closest('.phsec');
-      if(!keep&&!ps){c.remove();return}
-      if(!keep){var sec=P.secs[+ps.dataset.i];if(sec&&sec.items){sec.items=sec.items.filter(function(x){return x.id!==id});sec.n=sec.items.length;
-        var h=ps.querySelector('.phh .muted');if(h)h.textContent=sec.n} c.remove(); delete P.sel[id]; return}
+      if(!keep){phDropCell(c,id);return}
       var pt=c.querySelector('.pt'); if(p.tags.length){if(!pt){pt=document.createElement('span');pt.className='pt';c.appendChild(pt)}pt.textContent=p.tags.join(', ')} else if(pt) pt.remove();
     })});
 }
+function phDropCell(c,id){var ps=c.closest('.phsec');
+  if(ps){var sec=P.secs[+ps.dataset.i];if(sec&&sec.items){sec.items=sec.items.filter(function(x){return x.id!==id});sec.n=sec.items.length;
+    var h=ps.querySelector('.phh .muted');if(h)h.textContent=sec.n}}
+  c.remove(); delete P.sel[id];}
+/** Delete photos: they vanish at once, Undo for a few seconds, then the files go to Drive trash (restorable there for 30 days). */
+S.pendingPhTrash=[];
+function phDelete(ids){
+  ids=ids.filter(function(id){return P.byId[id]}); if(!ids.length) return;
+  ids.forEach(function(id){$$('#phTL .pc[data-id="'+id+'"], #cabPh .pc[data-id="'+id+'"]').forEach(function(c){phDropCell(c,id)})});
+  P.sel={}; phPaint();
+  var job={ids:ids,done:false}; S.pendingPhTrash.push(job);
+  function settle(){job.done=true;S.pendingPhTrash=S.pendingPhTrash.filter(function(j){return j!==job})}
+  function commit(){if(job.done)return;settle();call('api_photoDelete',ids).then(function(){return phStats(true)}).then(function(){if(S.view==='photos'&&$('#phTabs'))phTop()}).catch(function(){})}
+  var u=undoToast('Deleted '+(ids.length>1?ids.length+' photos':'photo'),function(){settle();return phStats(true).then(function(){if(S.view==='photos'||S.view==='cabinet')rerender()})},6000);
+  u.onExpire=commit;
+}
+window.addEventListener('pagehide',function(){(S.pendingPhTrash||[]).forEach(function(j){if(j.done)return;j.done=true;
+  try{fetch(CFG.api,{method:'POST',keepalive:true,body:JSON.stringify({k:CFG.key,fn:'api_photoDelete',a:[j.ids]})})}catch(e){}})});
 /** Full-screen viewer: ← → (or swipe), type a tag, F files, Esc closes. */
 function phViewer(id){
   var old=$('#phv'); if(old) old.remove();
@@ -1679,7 +1696,7 @@ function phViewer(id){
   v.innerHTML='<div class="top"><b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50vw">'+esc(p.name)+'</b><span style="opacity:.7;font-size:13px">'+(d&&!isNaN(d)?d.toLocaleDateString(undefined,{weekday:'short',year:'numeric',month:'short',day:'numeric'}):'')+(p.folder?' · '+esc(p.folder):'')+'</span><span class="grow"></span><span id="pvInfo" style="opacity:.6;font-size:12px"></span><a class="btn small" id="pvOpen" target="_blank" href="https://drive.google.com/file/d/'+encodeURIComponent(id)+'/view'+(S.user?'?authuser='+encodeURIComponent(S.user):'')+'">'+(/^video/.test(p.mime)?'▶ Play in Drive':'Open in Drive')+' ↗</a><button class="btn small" id="pvX">✕</button></div>'+
     '<div class="img"><img id="pvImg" src="'+(P.thumbs[id]||phThumbUrl(id,400))+'">'+(i>0?'<button class="nav l" id="pvL">‹</button>':'')+(i<flat.length-1?'<button class="nav r" id="pvR">›</button>':'')+'</div>'+
     '<div class="bot"><span id="pvTags"></span><span class="tagbox"><input id="pvIn" placeholder="Add tag (T)" autocomplete="off"><div class="tagsug" id="pvSug"></div></span><span id="pvRec"></span>'+
-    (p.status==='filed'?'<button class="btn small" id="pvBack">Back to inbox</button>':'<button class="btn small primary" id="pvFile">File (F)</button>')+'</div>';
+    (p.status==='filed'?'<button class="btn small" id="pvBack">Back to inbox</button>':'<button class="btn small primary" id="pvFile">File (F)</button>')+'<button class="btn small" id="pvDel" title="Delete (Del)">🗑 Delete</button></div>';
   document.body.appendChild(v);
   function tags(){var q=P.byId[id];$('#pvTags').innerHTML=q.tags.map(function(t){return '<button class="chip" data-x="'+esc(t)+'" title="Remove">'+esc(t)+' ✕</button>'}).join(' ');
     $$('#pvTags [data-x]').forEach(function(b){b.onclick=function(){phUpdate([id],{removeTags:[b.dataset.x]},'Removed “'+b.dataset.x+'”',tags)}});
@@ -1699,13 +1716,15 @@ function phViewer(id){
   function key(e){var tg=(e.target.tagName||'').toLowerCase();if(tg==='input')return;
     if(e.key==='Escape')close();else if(e.key==='ArrowLeft')go2(i-1);else if(e.key==='ArrowRight')go2(i+1);
     else if(e.key==='t'||e.key==='T'){e.preventDefault();$('#pvIn').focus()}
-    else if((e.key==='f'||e.key==='F')&&$('#pvFile'))$('#pvFile').click()}
+    else if((e.key==='f'||e.key==='F')&&$('#pvFile'))$('#pvFile').click()
+    else if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();$('#pvDel').click()}}
   document.addEventListener('keydown',key);
   $('#pvX').onclick=close; if($('#pvL'))$('#pvL').onclick=function(){go2(i-1)}; if($('#pvR'))$('#pvR').onclick=function(){go2(i+1)};
   var sx=null; $('#phv .img').addEventListener('touchstart',function(e){sx=e.touches[0].clientX},{passive:true});
   $('#phv .img').addEventListener('touchend',function(e){if(sx==null)return;var dx=e.changedTouches[0].clientX-sx;sx=null;if(Math.abs(dx)>60)go2(dx<0?i+1:i-1)});
   if($('#pvFile'))$('#pvFile').onclick=function(){var nextI=i;phUpdate([id],{status:'filed'},'Filed',function(){});var f=phFlat();if(!f.length){close();return}close();phViewer(f[Math.min(nextI,f.length-1)].id)};
   if($('#pvBack'))$('#pvBack').onclick=function(){phUpdate([id],{status:''},'Moved to photo inbox',function(){});close()};
+  $('#pvDel').onclick=function(){var nextI=i;phDelete([id]);var f=phFlat();close();if(f.length)phViewer(f[Math.min(nextI,f.length-1)].id)};
 }
 
 /* ---------- pairing ---------- */
