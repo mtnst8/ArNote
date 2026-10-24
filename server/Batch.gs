@@ -1291,6 +1291,9 @@ function classifyText_(text) {
   }
   var inSentences = lines.reduce(function (n, l) { var w = (l.match(/[A-Za-z]{2,}/g) || []).length; return n + (w >= 5 ? w : 0); }, 0);   // pages are full lines/paragraphs; screenshots are scattered words
   if (words >= 40 && inSentences >= words * 0.6) return { kind: 'document', fields: {} };
+  var tokens = words + (all.match(/\d+/g) || []).length;
+  if (lines.length >= 4 && tokens >= 20) return { kind: 'document', fields: {} };   // mostly words and numbers: screenshots, labels, forms, invitations
+  if (phone || email || web) return { kind: 'document', fields: {} };              // has an address or number worth keeping (a ticket, a sign with a website)
   return { kind: 'photo', fields: {} };
 }
 
