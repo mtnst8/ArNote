@@ -124,6 +124,8 @@ textarea,.field{width:100%;padding:9px 12px;border:1px solid var(--line);border-
 .phv .top{display:flex;gap:8px;align-items:center;padding:10px 14px;flex-wrap:wrap}.phv .top .grow{flex:1}
 .phv .img{flex:1;display:flex;align-items:center;justify-content:center;min-height:0;position:relative}
 .phv .img img{max-width:100%;max-height:100%;object-fit:contain}
+.phv .img iframe{width:calc(100% - 120px);height:100%;border:0;background:#000}
+@media (max-width:700px){.phv .img iframe{width:100%}.phv .img:has(iframe) .nav{top:auto;bottom:8px;transform:none;height:44px}}
 .phv .nav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.12);border:0;color:#fff;font-size:28px;width:46px;height:64px;border-radius:10px;cursor:pointer}
 .phv .nav.l{left:10px}.phv .nav.r{right:10px}
 .phv .bot{padding:10px 14px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
@@ -1692,9 +1694,9 @@ function phViewer(id){
   var old=$('#phv'); if(old) old.remove();
   var p=P.byId[id]; if(!p) return; var flat=phFlat(), i=flat.findIndex(function(x){return x.id===id});
   var v=document.createElement('div'); v.className='phv'; v.id='phv';
-  var d=p.taken?new Date(p.taken):null;
-  v.innerHTML='<div class="top"><b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50vw">'+esc(p.name)+'</b><span style="opacity:.7;font-size:13px">'+(d&&!isNaN(d)?d.toLocaleDateString(undefined,{weekday:'short',year:'numeric',month:'short',day:'numeric'}):'')+(p.folder?' · '+esc(p.folder):'')+'</span><span class="grow"></span><span id="pvInfo" style="opacity:.6;font-size:12px"></span><a class="btn small" id="pvOpen" target="_blank" href="https://drive.google.com/file/d/'+encodeURIComponent(id)+'/view'+(S.user?'?authuser='+encodeURIComponent(S.user):'')+'">'+(/^video/.test(p.mime)?'▶ Play in Drive':'Open in Drive')+' ↗</a><button class="btn small" id="pvX">✕</button></div>'+
-    '<div class="img"><img id="pvImg" src="'+(P.thumbs[id]||phThumbUrl(id,400))+'">'+(i>0?'<button class="nav l" id="pvL">‹</button>':'')+(i<flat.length-1?'<button class="nav r" id="pvR">›</button>':'')+'</div>'+
+  var d=p.taken?new Date(p.taken):null, isVid=/^video/.test(p.mime);
+  v.innerHTML='<div class="top"><b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50vw">'+esc(p.name)+'</b><span style="opacity:.7;font-size:13px">'+(d&&!isNaN(d)?d.toLocaleDateString(undefined,{weekday:'short',year:'numeric',month:'short',day:'numeric'}):'')+(p.folder?' · '+esc(p.folder):'')+'</span><span class="grow"></span><span id="pvInfo" style="opacity:.6;font-size:12px"></span><a class="btn small" id="pvOpen" target="_blank" href="https://drive.google.com/file/d/'+encodeURIComponent(id)+'/view'+(S.user?'?authuser='+encodeURIComponent(S.user):'')+'">Open in Drive ↗</a><button class="btn small" id="pvX">✕</button></div>'+
+    '<div class="img">'+(isVid?'<iframe id="pvVid" src="https://drive.google.com/file/d/'+encodeURIComponent(id)+'/preview'+(S.user?'?authuser='+encodeURIComponent(S.user):'')+'" allow="autoplay; fullscreen" allowfullscreen></iframe>':'<img id="pvImg" src="'+(P.thumbs[id]||phThumbUrl(id,400))+'">')+(i>0?'<button class="nav l" id="pvL">‹</button>':'')+(i<flat.length-1?'<button class="nav r" id="pvR">›</button>':'')+'</div>'+
     '<div class="bot"><span id="pvTags"></span><span class="tagbox"><input id="pvIn" placeholder="Add tag (T)" autocomplete="off"><div class="tagsug" id="pvSug"></div></span><span id="pvRec"></span>'+
     (p.status==='filed'?'<button class="btn small" id="pvBack">Back to inbox</button>':'<button class="btn small primary" id="pvFile">File (F)</button>')+'<button class="btn small" id="pvDel" title="Delete (Del)">🗑 Delete</button></div>';
   document.body.appendChild(v);
@@ -1706,9 +1708,9 @@ function phViewer(id){
   tags();
   tagInput($('#pvIn'),$('#pvSug'),function(t){rememberTags([t]);phUpdate([id],{addTags:[t]},'Tagged “'+t+'”',tags);setTimeout(function(){var x=$('#pvIn');if(x)x.focus()},50)});
   // full-size picture straight from Drive; the server version if the browser can't
-  var big=new Image(); big.onload=function(){var im=$('#pvImg');if(im&&document.body.contains(v))im.src=big.src};
+  if(!isVid){var big=new Image(); big.onload=function(){var im=$('#pvImg');if(im&&document.body.contains(v))im.src=big.src};
   big.onerror=function(){call('api_photoView',id).then(function(r){var im=$('#pvImg');if(im&&r.src)im.src=r.src}).catch(function(){})};
-  big.src=phThumbUrl(id,2000);
+  big.src=phThumbUrl(id,2000);}
   call('api_photoView',id,true).then(function(r){if(!document.body.contains(v))return;$('#pvInfo').textContent=[r.camera,r.location?'📍 '+(+r.location.latitude).toFixed(4)+', '+(+r.location.longitude).toFixed(4):''].filter(Boolean).join(' · ')}).catch(function(){});
   [flat[i+1],flat[i-1]].forEach(function(n){if(n){var pre=new Image();pre.src=phThumbUrl(n.id,2000)}});   // ready before you get there
   function close(){v.remove();document.removeEventListener('keydown',key)}
