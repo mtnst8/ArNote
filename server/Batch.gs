@@ -1029,6 +1029,21 @@ function photoDedupe_(budget, dry) {
     });
     if (tags.length !== keep.tags.length || status !== keep.status) keepTags[keep.id] = { tags: tags, status: status };
   });
+  // the same shot in two folders (a Takeout copy and a phone upload): same file name, time taken and shape → keep the first one
+  var gone1 = {}; drop.forEach(function (id) { gone1[id] = 1; });
+  var cross = {};
+  rows.forEach(function (p) { if (gone1[p.id] || !p.taken || !p.w) return;
+    var k = [p.name.toLowerCase(), p.taken, [p.w, p.h].sort().join('x')].join('|'); (cross[k] = cross[k] || []).push(p); });
+  Object.keys(cross).forEach(function (k) {
+    var g = cross[k]; if (g.length < 2) return; nGroups++;
+    var keep = g[0], kt = keepTags[keep.id] || { tags: keep.tags.slice(), status: keep.status }, ch = !!keepTags[keep.id];
+    g.slice(1).forEach(function (p) {
+      p.tags.forEach(function (t) { if (kt.tags.indexOf(t) < 0) { kt.tags.push(t); ch = true; } });
+      if (!kt.status && p.status) { kt.status = p.status; ch = true; }
+      drop.push(p.id);
+    });
+    if (ch) keepTags[keep.id] = kt;
+  });
   if (dry || !drop.length) return { groups: nGroups, extra: drop.length, trashed: 0, left: drop.length };
   var gone = trashFiles_(drop, budget - (Date.now() - start)), n = Object.keys(gone).length;
   dropPhotoRows_(gone, keepTags);
@@ -1087,6 +1102,82 @@ function api_photoTagVideos() {
 function api_photoDedupe(dry) {          // the 15-minute sync holds the same lock while it rewrites the Photos sheet
   var lock = LockService.getScriptLock(); if (!lock.tryLock(30000)) throw new Error('Photos are syncing; try again in a minute');
   try { return photoDedupe_(200000, dry); } finally { lock.releaseLock(); }
+}
+
+/* ---------- Adding photos from the app (photo picker or the phone's Share menu) ---------- */
+function photoPhoneFolder_() {
+  var p = props_(), id = p.getProperty('photoPhoneId');
+  if (id) { try { var f0 = DriveApp.getFolderById(id); if (!f0.isTrashed()) return f0; } catch (e) {} }
+  var root = photoRoot_(), it = root.getFoldersByName('Phone');
+  var f = it.hasNext() ? it.next() : root.createFolder('Phone');
+  p.setProperty('photoPhoneId', f.getId()); return f;
+}
+
+/**
+ * files: [{name, size, type, modified}]. For each: {skip: true} when the same name and size is already in ArNote,
+ * otherwise {url} — a Drive upload address the app sends the file to directly (no size limit, nothing passes through here).
+ */
+function api_photoUploadStart(files, origin) {
+  files = (files || []).slice(0, 30);
+  var known = {}; photoRows_().forEach(function (p) { known[p.id] = 1; });
+  var tok = ScriptApp.getOAuthToken(), folder = photoPhoneFolder_().getId();
+  var look = UrlFetchApp.fetchAll(files.map(function (f) {
+    var q = "name = '" + String(f.name).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "' and trashed = false";
+    return { url: 'https://www.googleapis.com/drive/v3/files?pageSize=50&fields=files(id,size)&q=' + encodeURIComponent(q), headers: { Authorization: 'Bearer ' + tok }, muteHttpExceptions: true };
+  }));
+  var need = [], out = files.map(function (f, i) {
+    var r = {}; try { r = JSON.parse(look[i].getContentText()); } catch (e) {}
+    if ((r.files || []).some(function (x) { return known[x.id] && +x.size === +f.size; })) return { skip: true };
+    need.push(i); return null;
+  });
+  var starts = UrlFetchApp.fetchAll(need.map(function (i) {
+    var f = files[i], meta = { name: String(f.name), parents: [folder] };
+    if (f.type) meta.mimeType = f.type;
+    if (+f.modified) meta.modifiedTime = new Date(+f.modified).toISOString();
+    var h = { Authorization: 'Bearer ' + tok, 'X-Upload-Content-Type': f.type || 'application/octet-stream', 'X-Upload-Content-Length': String(+f.size) };
+    if (origin) h.Origin = String(origin);
+    return { url: 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id', method: 'post',
+      contentType: 'application/json; charset=UTF-8', payload: JSON.stringify(meta), headers: h, muteHttpExceptions: true };
+  }));
+  need.forEach(function (i, j) {
+    var hd = starts[j].getAllHeaders ? starts[j].getAllHeaders() : starts[j].getHeaders(), loc = hd.Location || hd.location;
+    out[i] = loc ? { url: String(loc) } : { error: 'Drive refused the upload (' + starts[j].getResponseCode() + ')' };
+  });
+  return out;
+}
+
+/** Fallback when the browser can't send to Drive directly: the file comes through here (fine for photos, not big videos). */
+function api_photoUploadSmall(name, mime, b64) {
+  var f = photoPhoneFolder_().createFile(Utilities.newBlob(Utilities.base64Decode(b64), mime || 'application/octet-stream', name));
+  return f.getId();
+}
+
+/** Add just-uploaded files to the Photos index right away. items: [{id, modified}] */
+function api_photoUploadDone(items) {
+  items = (items || []).filter(function (x) { return x && x.id; });
+  if (!items.length) return 0;
+  var tok = ScriptApp.getOAuthToken(), tz = Session.getScriptTimeZone(), now = new Date().toISOString();
+  var res = UrlFetchApp.fetchAll(items.map(function (x) {
+    return { url: 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(x.id) + '?supportsAllDrives=true&fields=' +
+      encodeURIComponent('id,name,mimeType,createdTime,imageMediaMetadata(time,width,height),videoMediaMetadata(width,height)'), headers: { Authorization: 'Bearer ' + tok }, muteHttpExceptions: true };
+  }));
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try {
+    var sh = photoSheet_(), known = {}; photoRows_().forEach(function (p) { known[p.id] = 1; });
+    var add = [];
+    res.forEach(function (r, i) {
+      if (r.getResponseCode() !== 200) return;
+      var f = JSON.parse(r.getContentText()); if (known[f.id] || !/^(image|video)\//.test(f.mimeType)) return;
+      var tk = photoTaken_(f, 'Phone');
+      if (tk === String(f.createdTime || '').slice(0, 19) && +items[i].modified)      // no camera date and no date in the name: use the phone's file date
+        tk = Utilities.formatDate(new Date(+items[i].modified), tz, "yyyy-MM-dd'T'HH:mm:ss");
+      var md = f.imageMediaMetadata || f.videoMediaMetadata || {}, recent = tk && (Date.now() - new Date(tk).getTime()) < 60 * 864e5;
+      add.push([f.id, f.name, tk, f.mimeType, 'Phone', /^video\//.test(f.mimeType) ? VIDEO_TAG : '', '', now, md.width || '', md.height || '', recent && /^image\//.test(f.mimeType) ? 'q' : '']);
+      known[f.id] = 1;
+    });
+    if (add.length) { if (add.some(function (a) { return a[5]; })) ensureTags_([VIDEO_TAG]); sh.getRange(sh.getLastRow() + 1, 1, add.length, PHOTO_COLS.length).setValues(add); }
+    return add.length;
+  } finally { lock.releaseLock(); }
 }
 
 function api_photoSyncNow() { var r = syncPhotos_(Date.now() - 180000); return r; }   // ~60 seconds from the app

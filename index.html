@@ -29,6 +29,8 @@ nav button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
 main{max-width:900px;margin:0 auto;padding:12px 14px 120px}
 h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--mute);margin:0}
 .lhead{display:flex;align-items:center;gap:8px;margin:18px 0 8px}.lhead h2{flex:1}
+.upbar{height:8px;border-radius:4px;background:var(--line);overflow:hidden}
+#upFill{height:100%;width:0;background:var(--acc);transition:width .2s}
 .ttwrap{display:grid;grid-template-columns:270px minmax(0,1fr);gap:18px;align-items:start;margin-top:10px}
 .ttree{position:sticky;top:calc(var(--phTop,0px) + 8px);max-height:calc(100vh - 24px);overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px;background:var(--card)}
 .tthead{display:flex;gap:6px;align-items:center;padding:2px 2px 6px}
@@ -1546,7 +1548,9 @@ function viewPhotos(){
   P.sel={}; P.gen++; $('#main').classList.add('wide','photosv');
   var hd=$('#side header'), hr=hd?hd.getBoundingClientRect():null;   // phone layout: the app header stays on top, so month labels stick below it
   document.documentElement.style.setProperty('--phTop',(hr&&hr.width>window.innerWidth*0.7&&/sticky|fixed/.test(getComputedStyle(hd).position)?Math.round(hr.height):0)+'px');
-  $('#main').innerHTML='<div class="lhead"><h2>Photos</h2><span class="muted" id="phSync" style="font-size:12px"></span><button class="btn small" id="phNow">Check for new</button></div><div id="phTop"><p class="muted">Loading…</p></div><div id="phBar"></div>'+(P.tab==='tag'?'<div class="ttwrap '+(P.tag?'res':'tree')+'"><div class="ttree" id="phTree"></div><div class="ttres"><div id="phTH"></div><div id="phTL"></div></div></div>':'<div id="phTL"></div>')+'<div class="scrub" id="phScrub" style="display:none"></div>';
+  $('#main').innerHTML='<div class="lhead"><h2>Photos</h2><span class="muted" id="phSync" style="font-size:12px"></span><button class="btn small primary" id="phAdd" title="Pick photos or videos from this device">＋ Add photos</button><button class="btn small" id="phNow">Check for new</button><input type="file" id="phFile" accept="image/*,video/*" multiple hidden></div><div id="phTop"><p class="muted">Loading…</p></div><div id="phBar"></div>'+(P.tab==='tag'?'<div class="ttwrap '+(P.tag?'res':'tree')+'"><div class="ttree" id="phTree"></div><div class="ttres"><div id="phTH"></div><div id="phTL"></div></div></div>':'<div id="phTL"></div>')+'<div class="scrub" id="phScrub" style="display:none"></div>';
+  $('#phAdd').onclick=function(){$('#phFile').click()};
+  $('#phFile').onchange=function(){var f=[].slice.call(this.files||[]);this.value='';if(f.length)phAddFiles(f)};
   $('#phNow').onclick=function(){var b=this;b.disabled=true;b.textContent='Checking…';
     call('api_photoSyncNow').then(function(r){toast(r.added?r.added+' new photo'+(r.added>1?'s':''):'No new photos'+(r.complete?'':' yet (still reading folders)'));return phStats(true)}).then(function(){viewPhotos()}).catch(function(){b.disabled=false;b.textContent='Check for new'})};
   phStats().then(function(st){ if(S.view!=='photos') return;
@@ -1665,6 +1669,48 @@ function phPaint(){
   $('#pbClr').onclick=function(){P.sel={};phPaint()};
   $('#pbScan').onclick=function(){phScan(ids)};
   $('#pbDel').onclick=function(){phDelete(ids)};
+}
+/** Add photos/videos from this device: anything already in ArNote (same name and size) is skipped; the rest go straight to Drive (ArNote Photos/Phone). */
+function phAddFiles(files){
+  files=files.filter(function(f){return /^(image|video)\//.test(f.type)||/\.(jpe?g|png|gif|heic|heif|webp|mp4|mov|3gp|avi|mkv)$/i.test(f.name)});
+  if(!files.length){toast('Those aren\'t photos or videos');return}
+  var total=files.length, sent=0, skipped=0, failed=[], bytes=0, done=0, ids=[], stop=false;
+  files.forEach(function(f){bytes+=f.size});
+  modal('Adding '+total+' item'+(total>1?'s':''),'They go to ArNote Photos › Phone in your Drive. Anything already in ArNote is skipped.',
+    '<div class="upbar"><div id="upFill"></div></div><p id="upTxt" class="muted" style="margin:8px 0 0">Starting…</p>','<span class="grow"></span><button class="btn" id="upX">Stop</button>');
+  $('#upX').onclick=function(){stop=true;closeModal()};
+  function show(){var el=$('#upTxt');if(!el)return;$('#upFill').style.width=Math.round(done/Math.max(1,bytes)*100)+'%';
+    el.textContent='Uploaded '+sent+' of '+(total-skipped)+(skipped?' · '+skipped+' already in ArNote':'')+(failed.length?' · '+failed.length+' failed':'')}
+  function b64(f){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){res(String(r.result).split(',')[1])};r.onerror=rej;r.readAsDataURL(f)})}
+  function one(f,t){                      // straight to Drive; through the server only if the browser refuses (small files)
+    var base=done;
+    return new Promise(function(res,rej){var x=new XMLHttpRequest();x.open('PUT',t.url);
+      x.upload.onprogress=function(e){done=base+e.loaded;show()};
+      x.onload=function(){if(x.status>=200&&x.status<300){try{res(JSON.parse(x.responseText).id)}catch(e){rej(e)}}else rej(new Error('Drive '+x.status))};
+      x.onerror=function(){rej(new Error('network'))}; x.send(f)})
+    .catch(function(e){ if(f.size>30e6) throw e; return b64(f).then(function(d){return call('api_photoUploadSmall',f.name,f.type,d)}) })
+    .then(function(id){done=base+f.size;ids.push({id:id,modified:f.lastModified});sent++;show()});
+  }
+  var chunks=[]; for(var i=0;i<files.length;i+=20) chunks.push(files.slice(i,i+20));
+  (function nextChunk(){
+    if(stop) return;
+    if(!chunks.length) return finish();
+    var ch=chunks.shift();
+    call('api_photoUploadStart',ch.map(function(f){return {name:f.name,size:f.size,type:f.type,modified:f.lastModified}}),location.origin).then(function(tk){
+      var q=[]; ch.forEach(function(f,j){var t=tk[j]||{}; if(t.skip){skipped++;done+=f.size} else if(t.url) q.push([f,t]); else failed.push(f.name)}); show();
+      function worker(){if(stop||!q.length)return Promise.resolve();var it=q.shift();return one(it[0],it[1]).catch(function(){failed.push(it[0].name)}).then(worker)}
+      return Promise.all([worker(),worker()]);
+    }).then(function(){ var batch=ids.splice(0,ids.length); return batch.length?call('api_photoUploadDone',batch):0 })
+    .then(nextChunk).catch(function(){failed.push('(a batch)');nextChunk()});
+  })();
+  function finish(){
+    var el=$('#upTxt'); if(el){$('#upFill').style.width='100%';
+      el.innerHTML='<b>Done.</b> '+sent+' added'+(skipped?', '+skipped+(skipped===1?' was':' were')+' already in ArNote':'')+(failed.length?', <b style="color:var(--warn)">'+failed.length+' failed</b>: '+esc(failed.slice(0,5).join(', ')):'')+'.'+
+        (sent?' New photos from the last 60 days are read for receipts, cards and documents within 15 minutes.':'');
+      $('#upX').textContent='Close'; $('#upX').onclick=closeModal}
+    else toast(sent+' added'+(skipped?' · '+skipped+' already there':''));
+    phStats(true).then(function(){if(S.view==='photos')viewPhotos()}).catch(function(){});
+  }
 }
 /** Read selected photos: receipts, business cards and documents become notes in the Inbox. Shows what was found and how long each took. */
 function phScan(ids){
@@ -1873,7 +1919,14 @@ function receiveShare(){
       c.delete('shared'); (meta.files||[]).forEach(function(f,i){c.delete('file-'+i)});
       S.view='inbox'; go('inbox');
       var text=[meta.title,meta.text,meta.url].filter(Boolean).join('\n');
-      if(files.length) uploadFiles(files);
+      var media=files.length&&files.every(function(f){return /^(image|video)\//.test(f.type)});
+      if(media){ go('photos');
+        modal('Add '+files.length+' to Photos?','You shared '+(files.length>1?files.length+' photos/videos':'a photo or video')+' with ArNote.','<p class="muted" style="margin:0">Photos go to your gallery. Make notes instead if these are things to keep as notes.</p>',
+          '<button class="btn" id="shNote">Make notes</button><span class="grow"></span><button class="btn primary" id="shPh">Add to Photos</button>');
+        $('#shPh').onclick=function(){closeModal();phAddFiles(files)};
+        $('#shNote').onclick=function(){closeModal();go('inbox');uploadFiles(files)};
+      }
+      else if(files.length) uploadFiles(files);
       else if(text) call('api_createNote',(meta.title||meta.text||'Shared').split('\n')[0].slice(0,90),text,[]).then(function(){return load()}).then(function(){toast('Saved to Inbox');go('inbox')});
     });
   })}).catch(function(){go('inbox')});
