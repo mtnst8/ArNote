@@ -1073,6 +1073,8 @@ function api_photoDelete(ids) {
 
 /** Videos get the "Videos" tag (new ones on sync; this catches up the ones already indexed). */
 var VIDEO_TAG = 'Videos';
+/** Still needs tagging: no tags except the automatic Videos tag. */
+function untagged_(p) { return !p.tags.some(function (t) { return t !== VIDEO_TAG; }); }
 function api_photoTagVideos() {
   ensureTags_([VIDEO_TAG]);
   var sh = photoSheet_(); if (sh.getLastRow() < 2) return 0;
@@ -1110,6 +1112,7 @@ function api_photos(o) {
   var list = rows.filter(function (p) {
     if (o.view === 'inbox' && p.status) return false;
     if (o.view === 'filed' && p.status !== 'filed') return false;
+    if (o.view === 'untagged' && !untagged_(p)) return false;
     if (set && !p.tags.some(function (g) { return set[g]; })) return false;
     if (o.year && p.taken.slice(0, 4) !== String(o.year)) return false;
     if (o.month && p.taken.slice(5, 7) !== String(o.month)) return false;
@@ -1134,7 +1137,7 @@ function api_photoStats() {
   });
   var sync = {}; try { sync = JSON.parse(props_().getProperty('photoSync') || '{}'); } catch (e) {}
   var root = photoRoot_();
-  return { total: rows.length, inbox: inbox, filed: filed, years: years, tags: tags, ftags: ftags, folders: folders, sync: sync, rootUrl: root.getUrl() };
+  return { total: rows.length, inbox: inbox, filed: filed, untagged: rows.filter(untagged_).length, years: years, tags: tags, ftags: ftags, folders: folders, sync: sync, rootUrl: root.getUrl() };
 }
 
 /** Small square thumbnails (cached 6 hours). */
@@ -1218,6 +1221,7 @@ function api_photoMonths(o) {
   rows.forEach(function (p) {
     if (o.view === 'inbox' && p.status) return;
     if (o.view === 'filed' && p.status !== 'filed') return;
+    if (o.view === 'untagged' && !untagged_(p)) return;
     if (set && !p.tags.some(function (g) { return set[g]; })) return;
     if (o.folder && p.folder !== o.folder && p.folder.indexOf(o.folder + '/') !== 0) return;
     var k = /^\d{4}-\d\d/.test(p.taken) ? p.taken.slice(0, 7) : '';

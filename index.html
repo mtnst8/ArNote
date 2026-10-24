@@ -110,7 +110,11 @@ textarea,.field{width:100%;padding:9px 12px;border:1px solid var(--line);border-
 .pc.sel{outline:3px solid var(--acc);outline-offset:-3px}.pc.sel img{transform:scale(.9);transition:transform .1s}
 .pc .pv{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.55);color:#fff;border-radius:6px;font-size:12px;padding:1px 6px}
 .pc .pt{position:absolute;left:4px;bottom:4px;background:rgba(0,0,0,.6);color:#fff;border-radius:6px;font-size:11px;padding:1px 6px;max-width:85%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.phbar{position:sticky;top:var(--phTop,0px);z-index:5;background:var(--bg);padding:8px 0;display:flex;gap:6px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--line)}
+.phbar .tagsug{top:auto;bottom:calc(100% + 4px)}
+.phbar{position:fixed;bottom:0;left:var(--phL,0px);right:0;z-index:55;background:var(--bg);padding:10px 64px 10px 14px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line);box-shadow:0 -4px 16px rgba(0,0,0,.15)}
+body.phsel #main{padding-bottom:140px}
+body.phsel .toast{bottom:calc(var(--phBarH,60px) + 14px)}
+@media (max-width:600px){.phbar{padding-right:44px}}
 .tagbox{position:relative;display:inline-block}.tagbox input{border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:14px;background:var(--card);color:var(--ink);width:180px}
 .tagbox .tagsug{position:absolute;top:100%;left:0;z-index:70;min-width:260px}
 .scrub{position:fixed;right:0;top:calc(var(--phTop,0px) + 16px);bottom:16px;width:58px;z-index:6;cursor:ns-resize;user-select:none;touch-action:none}
@@ -414,6 +418,8 @@ function rememberTags(list){var r=store('recentTags')||[];list.forEach(function(
 
 /* ---------- navigation ---------- */
 function go(v,arg){
+  if(S.view==='photos') P.back={key:phKey(),y:window.scrollY};   // coming back to Photos (or redrawing it) keeps your place
+  var pv=$('#phv'); if(pv&&pv._close) pv._close(true);
   if(v!=='note') S.triage=[];
   if(v!==S.view||v==='note'||v==='new') S.sel={};
   S.view=v; $('#main').classList.remove('wide','photosv'); document.body.classList.remove('phsel'); $$('#nav button').forEach(function(b){b.classList.toggle('on',b.dataset.v===v)});
@@ -580,7 +586,7 @@ function viewCabinet(){
     if(C.tag&&!S.parent.hasOwnProperty(C.tag)) C.tag='';
     var inCab=function(t){var set={};descendants(t).forEach(function(x){set[x]=1});return cab.filter(function(n){return n.tags.some(function(g){return set[g]})})};
     var chain=[],x=C.tag,g=0; while(x&&g++<12){chain.unshift(x);x=S.parent[x]}
-    var ft=(P.stats&&P.stats.ftags)||{}, phN=function(t){var n=0;descendants(t).forEach(function(x){n+=ft[x]||0});return n};   // filed photos count too
+    var ft=(P.stats&&P.stats.tags)||{}, phN=function(t){var n=0;descendants(t).forEach(function(x){n+=ft[x]||0});return n};   // tagged photos count too
     if(!P.stats) phStats().then(function(){if(S.view==='cabinet'&&C.mode==='tag')viewCabinet()}).catch(function(){});
     var kids=(S.children[C.tag]||[]).map(function(k){return [k,inCab(k).length,phN(k)]}).filter(function(k){return k[1]||k[2]||S.newTags[k[0]]});
     var list=C.tag?byRecent(inCab(C.tag)):byRecent(cab), nPh=C.tag?phN(C.tag):0;
@@ -594,7 +600,7 @@ function viewCabinet(){
   $$('#main [data-ct]').forEach(function(b){b.onclick=function(){C.tag=b.dataset.ct;viewCabinet();window.scrollTo(0,0)}});
   bindNewTag(viewCabinet);
   if(C.mode==='drive') drawCabDrive(cab); else bindRows();
-  if($('#cabPh')) call('api_photos',{view:'filed',tag:C.tag,limit:1500}).then(function(r){var g=$('#cabPh');if(!g)return;
+  if($('#cabPh')) call('api_photos',{tag:C.tag,limit:1500}).then(function(r){var g=$('#cabPh');if(!g)return;
     r.items.forEach(function(p){P.byId[p.id]=p}); P.secs=[{k:'',n:r.items.length,items:r.items}]; P.sel={};
     g.innerHTML=r.items.map(phCell).join(''); phBind(g)}).catch(function(){});
 }
@@ -1445,15 +1451,17 @@ function openB64(b64,mime,name){
  * The grid is a timeline (newest first) of month sections; each month loads as it scrolls near, and the bar on the
  * right jumps through years/months like Google Photos. Thumbnails come straight from Drive when this browser is
  * signed in to the ArNote account (fast, cached by the browser); otherwise through the server. */
-var P={tab:'inbox',tag:'',folder:'',sel:{},byId:{},secs:[],stats:null,thumbs:{},gen:0,direct:true,queue:[],busy:0,last:null};
+var P={tab:'all',tag:'',folder:'',sel:{},byId:{},secs:[],stats:null,thumbs:{},gen:0,direct:true,queue:[],busy:0,last:null};
 function phStats(force){
   if(P.stats&&!force&&Date.now()-P.stats._t<60000) return Promise.resolve(P.stats);
   return call('api_photoStats').then(function(st){st._t=Date.now();P.stats=st;return st});
 }
 function phTagCount(t){var st=P.stats||{tags:{}},n=0;descendants(t).forEach(function(x){n+=st.tags[x]||0});return n}
-function phQ(){return {view:P.tab==='inbox'?'inbox':P.tab==='filed'?'filed':'all',tag:P.tab==='tag'?P.tag:'',folder:P.tab==='folder'?P.folder:''}}
+function phQ(){return {view:P.tab==='untagged'?'untagged':'all',tag:P.tab==='tag'?P.tag:'',folder:P.tab==='folder'?P.folder:''}}
+function phKey(){return P.tab+'|'+P.tag+'|'+P.folder}
 function monthLabel(k){if(!k)return 'No date';var d=new Date(+k.slice(0,4),+k.slice(5,7)-1,1);return d.toLocaleDateString(undefined,{month:'long',year:'numeric'})}
 function viewPhotos(){
+  if(P.tab==='inbox'||P.tab==='filed') P.tab='all';
   P.sel={}; P.gen++; $('#main').classList.add('wide','photosv');
   var hd=$('#side header'), hr=hd?hd.getBoundingClientRect():null;   // phone layout: the app header stays on top, so month labels stick below it
   document.documentElement.style.setProperty('--phTop',(hr&&hr.width>window.innerWidth*0.7&&/sticky|fixed/.test(getComputedStyle(hd).position)?Math.round(hr.height):0)+'px');
@@ -1470,14 +1478,14 @@ function viewPhotos(){
   }).catch(function(){$('#phTop').innerHTML='<p class="muted">Could not load photos.</p>'});
 }
 function phTop(){
-  var st=P.stats, tabs=[['inbox','Inbox',st.inbox],['filed','Filed',st.filed],['all','All',st.total],['tag','By tag'],['folder','By folder']];
+  var st=P.stats, tabs=[['all','All',st.total],['untagged','Untagged',st.untagged],['tag','By tag'],['folder','By folder']];
   var h='<div class="tabs" id="phTabs" style="margin:10px 0 4px">'+tabs.map(function(t){return '<button data-t="'+t[0]+'"'+(P.tab===t[0]?' class="on"':'')+'>'+t[1]+(t[2]!=null?' <span class="muted">'+t[2]+'</span>':'')+'</button>'}).join('')+'</div>';
   if(P.tab==='tag'){
     if(P.tag&&!S.parent.hasOwnProperty(P.tag)) P.tag='';
     var chain=[],x=P.tag,g=0; while(x&&g++<12){chain.unshift(x);x=S.parent[x]}
     var kids=(S.children[P.tag]||[]).map(function(k){return [k,phTagCount(k)]}).filter(function(k){return k[1]||S.newTags[k[0]]});
     h+='<div class="crumbs"><button class="cr" data-pt="">Tags</button>'+chain.map(function(c,i){return '<span class="sep">›</span>'+(i<chain.length-1?'<button class="cr" data-pt="'+esc(c)+'">'+esc(c)+'</button>':'<b>'+esc(c)+'</b>')}).join('')+'</div>'+
-      '<div class="subtags">'+kids.map(function(k){return '<button class="chip" data-pt="'+esc(k[0])+'">'+esc(k[0])+' <span class="muted">'+k[1]+'</span></button>'}).join('')+newTagChip(P.tag)+'</div>'+(kids.length||P.tag?'':'<p class="muted">No tagged photos yet. Select photos in the Inbox and type a tag.</p>');
+      '<div class="subtags">'+kids.map(function(k){return '<button class="chip" data-pt="'+esc(k[0])+'">'+esc(k[0])+' <span class="muted">'+k[1]+'</span></button>'}).join('')+newTagChip(P.tag)+'</div>'+(kids.length||P.tag?'':'<p class="muted">No tagged photos yet. Select photos and type a tag.</p>');
   } else if(P.tab==='folder'){
     var fc=st.folders||{}, pre=P.folder?P.folder+'/':'', sub={};
     Object.keys(fc).forEach(function(f){ if(P.folder&&f!==P.folder&&f.indexOf(pre)!==0) return; var rest=P.folder?f.slice(pre.length):f; if(!rest) return; var k=rest.split('/')[0]; sub[k]=(sub[k]||0)+fc[f]});
@@ -1498,13 +1506,14 @@ function phTimeline(){
   var gen=P.gen, tl=$('#phTL'); tl.innerHTML='<p class="muted">Loading…</p>';
   call('api_photoMonths',phQ()).then(function(r){ if(gen!==P.gen) return;
     P.secs=r.months.map(function(m){return {k:m[0],n:m[1],items:null,loading:false}});
-    if(!P.secs.length){tl.innerHTML='<p class="muted">'+(P.tab==='inbox'?'Photo inbox is empty. Nice.':'Nothing here.')+'</p>';$('#phScrub').style.display='none';return}
+    if(!P.secs.length){tl.innerHTML='<p class="muted">'+(P.tab==='untagged'?'Everything is tagged. Nice.':'Nothing here.')+'</p>';$('#phScrub').style.display='none';return}
     var cols=phCols(), cell=(tl.clientWidth-(cols-1)*4)/cols;
     tl.innerHTML=P.secs.map(function(s,i){var rows=Math.ceil(s.n/cols);
       return '<section class="phsec" data-i="'+i+'"><div class="phh"><input type="checkbox" class="msel" title="Select this month"><span>'+esc(monthLabel(s.k))+'</span><span class="muted" style="font-weight:400">'+s.n+'</span></div>'+
         '<div class="phgrid" style="min-height:'+Math.round(rows*(cell+4))+'px"></div></section>'}).join('');
     var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting)phLoadSec(+e.target.dataset.i)})},{rootMargin:'1500px 0px'});
     $$('#phTL .phsec').forEach(function(el){io.observe(el)}); P.io=io;
+    if(P.back&&P.back.key===phKey()){var y=P.back.y;P.back=null;window.scrollTo(0,y);setTimeout(function(){window.scrollTo(0,y)},60)}
     $$('#phTL .msel').forEach(function(c){c.onclick=function(e){e.stopPropagation();var i=+c.closest('.phsec').dataset.i;
       phLoadSec(i).then(function(){var s=P.secs[i];s.items.forEach(function(p){if(c.checked)P.sel[p.id]=1;else delete P.sel[p.id]});phPaint()})}});
     phScrub();
@@ -1555,13 +1564,14 @@ function phPaint(){
   var recent=(store('recentTags')||[]).filter(function(t){return S.parent.hasOwnProperty(t)}).slice(0,6);
   bar.innerHTML='<div class="phbar"><b>'+n+' selected</b><span class="tagbox"><input id="pbIn" placeholder="Type a tag + Enter" autocomplete="off"><div class="tagsug" id="pbSug"></div></span>'+
     recent.map(function(t){return '<button class="chip" data-rt="'+esc(t)+'">+ '+esc(t)+'</button>'}).join('')+
-    '<button class="btn small" id="pbTag">Tags…</button><button class="btn small primary" id="pbFile">File</button><button class="btn small" id="pbScan" title="Read receipts, business cards and documents">🧾 Scan</button><button class="btn small" id="pbBack">Back to inbox</button><button class="btn small" id="pbDel" title="Move to Drive trash (Undo for a few seconds)">🗑 Delete</button><button class="btn small" id="pbClr">Clear</button></div>';
+    '<button class="btn small" id="pbTag">Tags…</button><button class="btn small" id="pbScan" title="Read receipts, business cards and documents">🧾 Scan</button><button class="btn small" id="pbDel" title="Move to Drive trash (Undo for a few seconds)">🗑 Delete</button><button class="btn small" id="pbClr" title="Esc">Clear</button></div>';
   var ids=Object.keys(P.sel);
-  tagInput($('#pbIn'),$('#pbSug'),function(t){phUpdate(ids,{addTags:[t]},'Tagged “'+t+'”');rememberTags([t])});
+  var mr=$('#main').getBoundingClientRect(); document.documentElement.style.setProperty('--phL',(window.innerWidth>600?Math.round(mr.left):0)+'px');
+  document.documentElement.style.setProperty('--phBarH',bar.firstChild.offsetHeight+'px');
+  tagInput($('#pbIn'),$('#pbSug'),function(t){phUpdate(ids,{addTags:[t]},'Tagged “'+t+'”');rememberTags([t]);setTimeout(function(){var x=$('#pbIn');if(x)x.focus()},30)});
+  if(P.focusBar){P.focusBar=0;setTimeout(function(){var x=$('#pbIn');if(x)x.focus()},0)}
   $$('#phBar [data-rt]').forEach(function(b){b.onclick=function(){var t=b.dataset.rt;phUpdate(ids,{addTags:[t]},'Tagged “'+t+'”');rememberTags([t])}});
   $('#pbTag').onclick=function(){phTag(ids)};
-  $('#pbFile').onclick=function(){phUpdate(ids,{status:'filed'},'Filed')};
-  $('#pbBack').onclick=function(){phUpdate(ids,{status:''},'Moved to photo inbox')};
   $('#pbClr').onclick=function(){P.sel={};phPaint()};
   $('#pbScan').onclick=function(){phScan(ids)};
   $('#pbDel').onclick=function(){phDelete(ids)};
@@ -1664,7 +1674,7 @@ function phUpdate(ids,ch,msg,after){
 function phRedraw(ids){
   var q=phQ(), set=q.tag?(function(){var s={};descendants(q.tag).forEach(function(x){s[x]=1});return s})():null;
   ids.forEach(function(id){var p=P.byId[id];if(!p)return;
-    var keep=!(q.view==='inbox'&&p.status)&&!(q.view==='filed'&&p.status!=='filed')&&!(set&&!p.tags.some(function(g){return set[g]}));
+    var keep=!(set&&!p.tags.some(function(g){return set[g]}));   // in Untagged, newly tagged photos stay until the next load so more tags can be added
     $$('#phTL .pc[data-id="'+id+'"], #cabPh .pc[data-id="'+id+'"]').forEach(function(c){
       var ps=c.closest('.phsec');
       if(!keep){phDropCell(c,id);return}
@@ -1675,6 +1685,9 @@ function phDropCell(c,id){var ps=c.closest('.phsec');
   if(ps){var sec=P.secs[+ps.dataset.i];if(sec&&sec.items){sec.items=sec.items.filter(function(x){return x.id!==id});sec.n=sec.items.length;
     var h=ps.querySelector('.phh .muted');if(h)h.textContent=sec.n}}
   c.remove(); delete P.sel[id];}
+document.addEventListener('keydown',function(e){if(e.key!=='Escape'||S.view!=='photos'||$('#phv')||$('.modal'))return;
+  var tg=(e.target.tagName||'').toLowerCase(); if(tg==='input'&&e.target.id!=='pbIn') return;
+  if(Object.keys(P.sel).length){P.sel={};phPaint()}});
 /** Delete photos: they vanish at once, Undo for a few seconds, then the files go to Drive trash (restorable there for 30 days). */
 S.pendingPhTrash=[];
 function phDelete(ids){
@@ -1689,16 +1702,18 @@ function phDelete(ids){
 }
 window.addEventListener('pagehide',function(){(S.pendingPhTrash||[]).forEach(function(j){if(j.done)return;j.done=true;
   try{fetch(CFG.api,{method:'POST',keepalive:true,body:JSON.stringify({k:CFG.key,fn:'api_photoDelete',a:[j.ids]})})}catch(e){}})});
+window.addEventListener('popstate',function(){if(P.popSkip){P.popSkip=0;return}var v=$('#phv');if(v&&v._close)v._close(true)});
 /** Full-screen viewer: ← → (or swipe), type a tag, F files, Esc closes. */
-function phViewer(id){
+function phViewer(id,swapping){
   var old=$('#phv'); if(old) old.remove();
+  if(!swapping||!(history.state&&history.state.phv)) history.pushState({phv:1},'');   // phone/browser Back closes the photo and leaves you where you were
   var p=P.byId[id]; if(!p) return; var flat=phFlat(), i=flat.findIndex(function(x){return x.id===id});
   var v=document.createElement('div'); v.className='phv'; v.id='phv';
   var d=p.taken?new Date(p.taken):null, isVid=/^video/.test(p.mime);
   v.innerHTML='<div class="top"><b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50vw">'+esc(p.name)+'</b><span style="opacity:.7;font-size:13px">'+(d&&!isNaN(d)?d.toLocaleDateString(undefined,{weekday:'short',year:'numeric',month:'short',day:'numeric'}):'')+(p.folder?' · '+esc(p.folder):'')+'</span><span class="grow"></span><span id="pvInfo" style="opacity:.6;font-size:12px"></span><a class="btn small" id="pvOpen" target="_blank" href="https://drive.google.com/file/d/'+encodeURIComponent(id)+'/view'+(S.user?'?authuser='+encodeURIComponent(S.user):'')+'">Open in Drive ↗</a><button class="btn small" id="pvX">✕</button></div>'+
     '<div class="img">'+(isVid?'<iframe id="pvVid" src="https://drive.google.com/file/d/'+encodeURIComponent(id)+'/preview'+(S.user?'?authuser='+encodeURIComponent(S.user):'')+'" allow="autoplay; fullscreen" allowfullscreen></iframe>':'<img id="pvImg" src="'+(P.thumbs[id]||phThumbUrl(id,400))+'">')+(i>0?'<button class="nav l" id="pvL">‹</button>':'')+(i<flat.length-1?'<button class="nav r" id="pvR">›</button>':'')+'</div>'+
     '<div class="bot"><span id="pvTags"></span><span class="tagbox"><input id="pvIn" placeholder="Add tag (T)" autocomplete="off"><div class="tagsug" id="pvSug"></div></span><span id="pvRec"></span>'+
-    (p.status==='filed'?'<button class="btn small" id="pvBack">Back to inbox</button>':'<button class="btn small primary" id="pvFile">File (F)</button>')+'<button class="btn small" id="pvDel" title="Delete (Del)">🗑 Delete</button></div>';
+    '<button class="btn small" id="pvDel" title="Delete (Del)">🗑 Delete</button></div>';
   document.body.appendChild(v);
   function tags(){var q=P.byId[id];$('#pvTags').innerHTML=q.tags.map(function(t){return '<button class="chip" data-x="'+esc(t)+'" title="Remove">'+esc(t)+' ✕</button>'}).join(' ');
     $$('#pvTags [data-x]').forEach(function(b){b.onclick=function(){phUpdate([id],{removeTags:[b.dataset.x]},'Removed “'+b.dataset.x+'”',tags)}});
@@ -1713,20 +1728,19 @@ function phViewer(id){
   big.src=phThumbUrl(id,2000);}
   call('api_photoView',id,true).then(function(r){if(!document.body.contains(v))return;$('#pvInfo').textContent=[r.camera,r.location?'📍 '+(+r.location.latitude).toFixed(4)+', '+(+r.location.longitude).toFixed(4):''].filter(Boolean).join(' · ')}).catch(function(){});
   [flat[i+1],flat[i-1]].forEach(function(n){if(n){var pre=new Image();pre.src=phThumbUrl(n.id,2000)}});   // ready before you get there
-  function close(){v.remove();document.removeEventListener('keydown',key)}
-  function go2(j){var f=phFlat();if(j<0)return;if(j>=f.length){var nx=P.secs.findIndex(function(s){return !s.items});if(nx>=0)phLoadSec(nx).then(function(){go2(j)});return}close();phViewer(f[j].id)}
+  function swap(){v.remove();document.removeEventListener('keydown',key)}
+  function close(fromBack){if(!document.body.contains(v))return;swap();if(!fromBack&&history.state&&history.state.phv){P.popSkip=1;history.back()}}
+  v._close=close;
+  function go2(j){var f=phFlat();if(j<0)return;if(j>=f.length){var nx=P.secs.findIndex(function(s){return !s.items});if(nx>=0)phLoadSec(nx).then(function(){go2(j)});return}swap();phViewer(f[j].id,true)}
   function key(e){var tg=(e.target.tagName||'').toLowerCase();if(tg==='input')return;
     if(e.key==='Escape')close();else if(e.key==='ArrowLeft')go2(i-1);else if(e.key==='ArrowRight')go2(i+1);
     else if(e.key==='t'||e.key==='T'){e.preventDefault();$('#pvIn').focus()}
-    else if((e.key==='f'||e.key==='F')&&$('#pvFile'))$('#pvFile').click()
     else if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();$('#pvDel').click()}}
   document.addEventListener('keydown',key);
   $('#pvX').onclick=close; if($('#pvL'))$('#pvL').onclick=function(){go2(i-1)}; if($('#pvR'))$('#pvR').onclick=function(){go2(i+1)};
   var sx=null; $('#phv .img').addEventListener('touchstart',function(e){sx=e.touches[0].clientX},{passive:true});
   $('#phv .img').addEventListener('touchend',function(e){if(sx==null)return;var dx=e.changedTouches[0].clientX-sx;sx=null;if(Math.abs(dx)>60)go2(dx<0?i+1:i-1)});
-  if($('#pvFile'))$('#pvFile').onclick=function(){var nextI=i;phUpdate([id],{status:'filed'},'Filed',function(){});var f=phFlat();if(!f.length){close();return}close();phViewer(f[Math.min(nextI,f.length-1)].id)};
-  if($('#pvBack'))$('#pvBack').onclick=function(){phUpdate([id],{status:''},'Moved to photo inbox',function(){});close()};
-  $('#pvDel').onclick=function(){var nextI=i;phDelete([id]);var f=phFlat();close();if(f.length)phViewer(f[Math.min(nextI,f.length-1)].id)};
+  $('#pvDel').onclick=function(){var nextI=i;phDelete([id]);var f=phFlat();if(!f.length){close();return}swap();phViewer(f[Math.min(nextI,f.length-1)].id,true)};
 }
 
 /* ---------- pairing ---------- */
