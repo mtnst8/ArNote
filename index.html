@@ -397,14 +397,14 @@ function store(k,v){try{if(v===undefined)return JSON.parse(localStorage.getItem(
 
 /* ---------- data ---------- */
 function load(quiet){
-  return (quiet?rawCall(CFG,'api_bootstrap',[]):call('api_bootstrap')).then(function(b){
+  return (quiet?rawCall(CFG,'api_bootstrap',[]):call('api_bootstrap')).then(function(b){applyBoot(b);if(!quiet)call('api_flushHeaders').catch(function(){})});
+}
+function applyBoot(b){
     S.sig=noteSig(b.notes); S.lastSync=Date.now();
     S.notes=b.notes; S.order=b.bookmarkOrder; S.byId={}; S.user=b.user||'';
     if($('#who')&&S.user) $('#who').innerHTML='<b>'+esc(S.user[0].toUpperCase())+'</b><span>'+esc(S.user)+'</span>';
     b.notes.forEach(function(n){S.byId[n.id]=n});
     setTags(b.tags); refreshInboxCount();
-    if(!quiet) call('api_flushHeaders').catch(function(){});
-  });
 }
 function noteSig(arr){return arr.length+'|'+arr.map(function(n){return n.id+n.updated+n.notebook+n.tags.join(',')}).join(';').length+'|'+arr.reduce(function(h,n){var x=n.id+n.updated+n.notebook+n.tags.join(',')+n.title;for(var i=0;i<x.length;i++)h=(h*31+x.charCodeAt(i))|0;return h},7)}
 /* Keep in step with other devices: re-check when the window comes back into view, and every minute while it's open. */
@@ -412,8 +412,10 @@ function syncNow(force){
   if(!CFG||S.syncing||document.visibilityState!=='visible') return;
   if(!force&&Date.now()-(S.lastSync||0)<50000) return;
   if(Date.now()-(S.lastCall||0)<5000) return;            // you just changed something: let it settle first
-  var before=S.sig; S.syncing=true;
-  load(true).then(function(){
+  var before=S.sig, t0=Date.now(); S.syncing=true;
+  rawCall(CFG,'api_bootstrap',[]).then(function(b){
+    if((S.lastCall||0)>=t0-1000) return;                  // you changed something while this was loading: its copy is out of date, so skip it
+    applyBoot(b);
     if(S.sig===before) return;
     var busy=$('#shade')||(document.activeElement&&/input|textarea|select/i.test(document.activeElement.tagName));
     if(busy||['note','new','settings'].indexOf(S.view)>=0) return;   // don't pull the page out from under you
