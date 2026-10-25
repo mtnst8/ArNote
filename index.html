@@ -34,6 +34,18 @@ h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--mute)
 .rcf select,.rcf input{padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:inherit;font-size:14px}
 .rcf #rcQ{width:140px}
 .rcsum{margin:0 0 10px;font-size:15px}
+.rclay{display:grid;grid-template-columns:250px minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:800px){.rclay{grid-template-columns:1fr}}
+.rcnav{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px;font-size:14px;position:sticky;top:8px;max-height:calc(100vh - 24px);overflow:auto}
+.rcnav h4{margin:4px 6px 6px;font-size:12px;text-transform:uppercase;letter-spacing:.4px;opacity:.6}
+.rcnav select{width:100%;margin:0 0 6px;padding:5px 6px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:inherit;font-size:13px}
+.rcn{display:flex;gap:6px;align-items:baseline;padding:6px 8px;border-radius:8px;cursor:pointer}
+.rcn:hover{background:rgba(127,127,127,.09)}.rcn.on{background:var(--acc);color:#fff}.rcn.on .muted,.rcn.on .ub2{color:#fff;opacity:.85}
+.rcn .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rcn .am{font-variant-numeric:tabular-nums;white-space:nowrap}
+.rcn.l2{margin-left:14px;font-size:13px}.ub2{display:block;font-size:11px;color:var(--warn)}
+.rccr{margin:0 0 8px;font-size:15px}.rccr button{background:none;border:none;color:var(--acc);font:inherit;cursor:pointer;padding:0}
+.rcselbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 10px;margin:0 0 8px;border-radius:10px;background:var(--card);border:1px solid var(--acc)}
+.rct td.ck,.rct th.ck{width:28px;padding-right:0}.rct .bl{font-size:12px;color:var(--acc);white-space:nowrap}
 .rcwrap{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:12px}
 .rct{border-collapse:collapse;width:100%;font-size:14px}
 .rct th{text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:.4px;opacity:.6;font-weight:600;padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -1498,11 +1510,13 @@ function viewReceipts(){
 function rcDraw(){
   var d=S.rcData, cols=d.cols, el=$('#rcBody'); if(!el) return;
   $('#rcSheet').href=d.url; $('#rcSheet').style.display='';
-  var rg=rcRange(), q=(RC.q||'').toLowerCase();
+  var rg=rcRange(), q=(RC.q||'').toLowerCase(), drilled=cols.some(function(c){return RC.f[c.name]}), nbOn=drilled&&RC.nb!==false;
+  S.rcSel=S.rcSel||{};
   var rows=d.rows.filter(function(r){
     if(rg[0]&&(!r.date||r.date<rg[0]))return false; if(rg[1]&&(!r.date||r.date>rg[1]))return false;
     for(var i=0;i<cols.length;i++){var f=RC.f[cols[i].name];if(!f)continue;if(f==='__none'?r.cols[i].length:r.cols[i].indexOf(f)<0)return false}
-    if(q&&(r.vendor+' '+r.title).toLowerCase().indexOf(q)<0)return false; return true});
+    if(q&&(r.vendor+' '+r.title).toLowerCase().indexOf(q)<0)return false;
+    if(nbOn&&r.billed)return false; return true});
   rows.sort(function(a,b){return String(b.date).localeCompare(String(a.date))});
   var sum=function(a,k){return a.reduce(function(s,r){return s+(+r[k]||0)},0)};
   // the controls
@@ -1515,14 +1529,22 @@ function rcDraw(){
     cols.map(function(c,i){var vals={};d.rows.forEach(function(r){r.cols[i].forEach(function(t){vals[t]=1})});
       return '<select data-rcf="'+esc(c.name)+'">'+opts([['',c.name+': all']].concat(Object.keys(vals).sort().map(function(t){return [t,t]}),[['__none',c.name+': none']]),RC.f[c.name]||'')+'</select>'}).join('')+
     '<input id="rcQ" placeholder="Vendor…" value="'+esc(RC.q||'')+'" autocomplete="off"></div>';
+  var path=RC.lv&&RC.lv.length===cols.length?RC.lv:cols.map(function(c,i){return i}), crumb=[];
+  path.forEach(function(i){var v=RC.f[cols[i].name];if(v)crumb.push([i,v])});
+  if(crumb.length) h+='<div class="rccr"><button data-cr="-1">All receipts</button>'+crumb.map(function(c,k){var lab=c[1]==='__none'?'No '+cols[c[0]].name:c[1];
+      return ' <span class="muted">›</span> '+(k<crumb.length-1?'<button data-cr="'+k+'">'+esc(lab)+'</button>':'<b>'+esc(lab)+'</b>')}).join('')+
+    ' <label class="muted" style="font-size:13px;margin-left:10px;white-space:nowrap"><input type="checkbox" id="rcNb"'+(nbOn?' checked':'')+'> Only not billed yet</label></div>';
+  var nSel=Object.keys(S.rcSel).length;
+  if(nSel){var selRows=d.rows.filter(function(r){return S.rcSel[r.noteId]});
+    h+='<div class="rcselbar"><b>'+nSel+' selected</b><span class="muted">'+money(sum(selRows,'total'))+'</span><button class="btn small primary" id="rcBill">✓ Mark billed</button><button class="btn small" id="rcUnbill">Mark not billed</button><button class="btn small" id="rcSelX">Clear</button></div>'}
   h+='<div class="rcsum"><b>'+rows.length+'</b> receipt'+(rows.length===1?'':'s')+' · Total <b>'+money(sum(rows,'total'))+'</b> · Tax <b>'+money(sum(rows,'tax'))+'</b></div>';
   if(!cols.length) h+='<p class="muted" style="font-size:13px;margin:0 0 8px">Tip: add report columns like Job and Category in <a href="#" id="rcSet">Settings → Receipts</a> — they come from your tags.</p>';
   // the table
-  var ncol=3+cols.length;
+  var ncol=5+cols.length;
   var row=function(r){var warn=r.check?'<span class="rcw" title="Vendor, date or total missing">⚠</span>':'';
-    return '<tr data-n="'+esc(r.noteId)+'"><td>'+esc(r.date||'—')+'</td><td>'+warn+esc(r.vendor||'(no vendor)')+'</td>'+
+    return '<tr data-n="'+esc(r.noteId)+'"><td class="ck"><input type="checkbox" class="rck"'+(S.rcSel[r.noteId]?' checked':'')+'></td><td>'+esc(r.date||'—')+'</td><td>'+warn+esc(r.vendor||'(no vendor)')+'</td>'+
       cols.map(function(c,i){return '<td>'+esc(r.cols[i].join(', '))+(i===0&&r.cols[0].length>1?' <span class="rcw" title="Tagged with more than one">⚠ '+r.cols[0].length+'</span>':'')+'</td>'}).join('')+
-      '<td>'+esc(r.paid)+'</td><td class="n">'+money(r.tax)+'</td><td class="n">'+money(r.total)+'</td></tr>'};
+      '<td>'+esc(r.paid)+'</td><td class="bl">'+(r.billed?'✓ '+esc(r.billed):'')+'</td><td class="n">'+money(r.tax)+'</td><td class="n">'+money(r.total)+'</td></tr>'};
   var body='';
   if(RC.grp){var key=function(r){if(RC.grp==='vendor')return r.vendor||'(no vendor)';if(RC.grp==='paid')return r.paid||'(not set)';if(RC.grp==='month')return r.date?r.date.slice(0,7):'(no date)';
       var i=+RC.grp.slice(1);return r.cols[i]&&r.cols[i][0]||'(none)'};
@@ -1531,11 +1553,30 @@ function rcDraw(){
     order.forEach(function(k){var lab=RC.grp==='month'&&/^\d{4}-\d\d$/.test(k)?monthLabel(k):k;
       body+='<tr class="rcg"><td colspan="'+ncol+'">'+esc(lab)+' <span class="muted">'+g[k].length+'</span></td><td class="n">'+money(sum(g[k],'tax'))+'</td><td class="n">'+money(sum(g[k],'total'))+'</td></tr>'+g[k].map(row).join('')});
   } else body=rows.map(row).join('');
-  h+=rows.length?'<div class="rcwrap"><table class="rct"><thead><tr><th>Date</th><th>Vendor</th>'+cols.map(function(c){return '<th>'+esc(c.name)+'</th>'}).join('')+'<th>Paid with</th><th class="n">Tax</th><th class="n">Total</th></tr></thead><tbody>'+body+
+  h+=rows.length?'<div class="rcwrap"><table class="rct"><thead><tr><th class="ck"><input type="checkbox" id="rckAll" title="Select all shown"></th><th>Date</th><th>Vendor</th>'+cols.map(function(c){return '<th>'+esc(c.name)+'</th>'}).join('')+'<th>Paid with</th><th>Billed</th><th class="n">Tax</th><th class="n">Total</th></tr></thead><tbody>'+body+
     '</tbody><tfoot><tr><td colspan="'+ncol+'">Total</td><td class="n">'+money(sum(rows,'tax'))+'</td><td class="n">'+money(sum(rows,'total'))+'</td></tr></tfoot></table></div>'
     :'<p class="muted">'+(d.rows.length?'No receipts match.':'No receipts yet. Photos of receipts are read automatically; for older ones select them in Photos and press 🧾 Scan.')+'</p>';
-  h+='<div class="bar" style="margin-top:10px"><button class="btn" id="rcCsv">Export (CSV)</button><button class="btn" id="rcPrint">Print</button></div>';
-  el.innerHTML=h;
+  h+='<div class="bar" style="margin-top:10px"><button class="btn" id="rcCsv">Export (CSV)</button><button class="btn" id="rcPrint">🖨 Print / PDF</button>'+
+    '<label class="muted" style="font-size:13px"><input type="checkbox" id="rcPics"'+(RC.pics!==false?' checked':'')+'> include receipt pictures</label></div>';
+  el.innerHTML=cols.length?'<div class="rclay"><div class="rcnav" id="rcNav"></div><div>'+h+'</div></div>':h;
+  if(cols.length) rcNav(d,path,rg,q);
+  $$('#rcBody [data-cr]').forEach(function(b){b.onclick=function(){var k=+b.dataset.cr;crumb.forEach(function(c,j){if(j>k)delete RC.f[cols[c[0]].name]});S.rcSel={};rcSave();rcDraw()}});
+  if($('#rcNb')) $('#rcNb').onchange=function(){RC.nb=this.checked;rcSave();rcDraw()};
+  $('#rcPics').onchange=function(){RC.pics=this.checked;rcSave()};
+  $$('#rcBody .rck').forEach(function(c){c.onclick=function(e){e.stopPropagation();var id=c.closest('tr').dataset.n;if(c.checked)S.rcSel[id]=1;else delete S.rcSel[id];rcDraw()}});
+  if($('#rckAll')){$('#rckAll').checked=rows.length>0&&rows.every(function(r){return S.rcSel[r.noteId]});
+    $('#rckAll').onclick=function(){var on=this.checked;rows.forEach(function(r){if(on)S.rcSel[r.noteId]=1;else delete S.rcSel[r.noteId]});rcDraw()}}
+  function bill(on){var ids=Object.keys(S.rcSel),before={};d.rows.forEach(function(r){if(S.rcSel[r.noteId])before[r.noteId]=r.billed});
+    var today=new Date(),td=today.getFullYear()+'-'+('0'+(today.getMonth()+1)).slice(-2)+'-'+('0'+today.getDate()).slice(-2);
+    d.rows.forEach(function(r){if(S.rcSel[r.noteId])r.billed=on?(r.billed||td):''});S.rcSel={};rcDraw();
+    var pr=call('api_receiptBilled',ids.filter(function(id){return on?!before[id]:true}),on);
+    undoToast((on?'Marked billed':'Marked not billed')+' ('+ids.length+')',function(){return pr.then(function(){
+      var groups={};ids.forEach(function(id){var k=before[id]||'';(groups[k]=groups[k]||[]).push(id)});
+      return Promise.all(Object.keys(groups).map(function(k){return call('api_receiptBilled',groups[k],k||false)}))}).then(function(){
+      d.rows.forEach(function(r){if(r.noteId in before)r.billed=before[r.noteId]||''});if(S.view==='receipts')rcDraw()})})}
+  if($('#rcBill')) $('#rcBill').onclick=function(){bill(true)};
+  if($('#rcUnbill')) $('#rcUnbill').onclick=function(){bill(false)};
+  if($('#rcSelX')) $('#rcSelX').onclick=function(){S.rcSel={};rcDraw()};
   var redo=function(){rcSave();rcDraw()};
   $('#rcPer').onchange=function(){RC.per=this.value;redo()};
   if($('#rcFrom')){$('#rcFrom').onchange=function(){RC.from=this.value;redo()};$('#rcTo').onchange=function(){RC.to=this.value;redo()}}
@@ -1544,7 +1585,7 @@ function rcDraw(){
   var qt;$('#rcQ').oninput=function(){var v=this.value;clearTimeout(qt);qt=setTimeout(function(){RC.q=v;rcSave();rcDraw();var x=$('#rcQ');if(x){x.focus();x.setSelectionRange(v.length,v.length)}},300)};
   if($('#rcSet'))$('#rcSet').onclick=function(e){e.preventDefault();go('settings')};
   $$('#rcBody tr[data-n]').forEach(function(tr){tr.onclick=function(){rcDetails(tr.dataset.n)}});
-  var title='Receipts '+(rg[0]||'')+(rg[1]?' to '+rg[1]:'');
+  var title=(crumb.length?crumb.map(function(c){return c[1]==='__none'?'No '+cols[c[0]].name:c[1]}).join(' › ')+' — ':'')+'Receipts '+(rg[0]||'')+(rg[1]?' to '+rg[1]:'');
   $('#rcCsv').onclick=function(){
     var qv=function(v){v=String(v===null||v===undefined?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
     var lines=[['Date','Vendor'].concat(cols.map(function(c){return c.name}),['Other tags','Paid with','Tax','Total','Note']).map(qv).join(',')].concat(rows.map(function(r){
@@ -1552,7 +1593,35 @@ function rcDraw(){
     var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([lines.join('\r\n')],{type:'text/csv'}));a.download=title.replace(/[^\w -]/g,'').trim()+'.csv';document.body.appendChild(a);a.click();a.remove()};
   $('#rcPrint').onclick=function(){var w=window.open('','_blank');if(!w){toast('Allow pop-ups to print');return}
     w.document.write('<!doctype html><title>'+esc(title)+'</title><style>body{font:12px system-ui,sans-serif;margin:24px;color:#111}h1{font-size:16px;margin:0 0 4px}p{margin:0 0 12px;color:#555}table{border-collapse:collapse;width:100%}th,td{padding:4px 6px;border-bottom:1px solid #ddd;text-align:left}th{border-bottom:2px solid #333}.n{text-align:right;white-space:nowrap}.rcg td{font-weight:700;background:#f2f2f2}tfoot td{font-weight:700;border-top:2px solid #333}.rcw,.muted{color:#888;font-weight:400}</style>'+
-      '<h1>'+esc(title)+'</h1><p>'+$('.rcsum').innerHTML+'</p>'+$('.rct').outerHTML);w.document.close();w.focus();setTimeout(function(){w.print()},300)};
+      '.ck{display:none}.pics{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px;page-break-before:always}.pic{page-break-inside:avoid;break-inside:avoid;border:1px solid #ccc;padding:6px}.pic b{display:block;margin-bottom:4px}.pic img{width:100%;max-height:115mm;object-fit:contain}</style>'+
+      '<h1>'+esc(title)+'</h1><p>'+$('.rcsum').innerHTML+'</p>'+($('.rct')?$('.rct').outerHTML:'')+
+      (RC.pics!==false&&rows.length?'<div class="pics">'+rows.map(function(r){return '<div class="pic"><b>'+esc((r.date||'')+' · '+(r.vendor||'')+' · '+money(r.total))+'</b><img src="'+phThumbUrl(r.fileId,1600)+'"></div>'}).join('')+'</div>':''));
+    w.document.close();w.focus();
+    var imgs=[].slice.call(w.document.images),left=imgs.length,go2=function(){if(go2.done)return;go2.done=1;setTimeout(function(){w.print()},300)};
+    if(!left)go2();imgs.forEach(function(im){if(im.complete){if(!--left)go2()}else im.onload=im.onerror=function(){if(!--left)go2()}});setTimeout(go2,20000)};
+}
+/** Left panel: drill down by the report columns (e.g. Job › Category), with counts, totals and what's not billed yet. */
+function rcNav(d,path,rg,q){
+  var cols=d.cols, el=$('#rcNav'); if(!el) return;
+  var base=d.rows.filter(function(r){if(rg[0]&&(!r.date||r.date<rg[0]))return false;if(rg[1]&&(!r.date||r.date>rg[1]))return false;
+    return !q||(r.vendor+' '+r.title).toLowerCase().indexOf(q)>=0});
+  var key=function(r,i){return r.cols[i].length?r.cols[i]:['__none']};
+  function level(rows,i,cls){var g={};rows.forEach(function(r){key(r,i).forEach(function(v){(g[v]=g[v]||[]).push(r)})});
+    var names=Object.keys(g).sort(function(a,b){return (a==='__none')-(b==='__none')||a.localeCompare(b)});
+    return names.map(function(v){var rs=g[v],tot=0,ub=0;rs.forEach(function(r){tot+=+r.total||0;if(!r.billed)ub+=+r.total||0});
+      return {v:v,rs:rs,html:'<div class="rcn '+cls+(RC.f[cols[i].name]===v?' on':'')+'" data-i="'+i+'" data-v="'+esc(v)+'"><span class="nm">'+esc(v==='__none'?'No '+cols[i].name:v)+
+        ' <span class="muted">'+rs.length+'</span>'+(ub>0.004&&ub<tot-0.004?'<span class="ub2">'+money(ub)+' not billed</span>':ub>0.004?'<span class="ub2">not billed</span>':'')+'</span><span class="am">'+money(tot)+'</span></div>'}})}
+  var i0=path[0], i1=path[1], h='<h4>Drill down</h4>';
+  if(cols.length>1) h+='<select id="rcStart">'+cols.map(function(c,i){var o=[i].concat(cols.map(function(x,j){return j}).filter(function(j){return j!==i}));
+    return '<option value="'+o.join(',')+'"'+(i===i0?' selected':'')+'>Start with '+esc(c.name)+'</option>'}).join('')+'</select>';
+  level(base,i0,'').forEach(function(a){h+=a.html;
+    if(i1!==undefined&&RC.f[cols[i0].name]===a.v) level(a.rs,i1,'l2').forEach(function(b){h+=b.html})});
+  el.innerHTML=h;
+  if($('#rcStart')) $('#rcStart').onchange=function(){RC.lv=this.value.split(',').map(Number);cols.forEach(function(c){delete RC.f[c.name]});S.rcSel={};rcSave();rcDraw()};
+  $$('#rcNav .rcn').forEach(function(n){n.onclick=function(){var i=+n.dataset.i,v=n.dataset.v,c=cols[i].name;
+    if(RC.f[c]===v){delete RC.f[c];if(i===i0&&i1!==undefined)delete RC.f[cols[i1].name]}
+    else{RC.f[c]=v;if(i===i0){path.slice(1).forEach(function(j){delete RC.f[cols[j].name]})}}
+    S.rcSel={};rcSave();rcDraw();window.scrollTo(0,0)}});
 }
 /** One receipt: the photo plus its details, fixable. */
 function rcDetails(noteId){
@@ -1794,7 +1863,7 @@ function viewPhotos(){
   document.documentElement.style.setProperty('--phTop',(hr&&hr.width>window.innerWidth*0.7&&/sticky|fixed/.test(getComputedStyle(hd).position)?Math.round(hr.height):0)+'px');
   $('#main').innerHTML='<div class="lhead"><h2>Photos</h2><span class="muted" id="phSync" style="font-size:12px"></span><button class="btn small primary" id="phAdd" title="Pick photos or videos from this device">＋ Add photos</button><button class="btn small" id="phNow">Check for new</button><input type="file" id="phFile" accept="image/*,video/*" multiple hidden></div>'+
     '<div class="setrow" style="margin:6px 0 0"><input class="field" id="phSrch" type="search" placeholder="🔍 Search photos — a town, place, tag or file name" autocomplete="off" style="margin:0;max-width:420px" value="'+esc(P.q||'')+'">'+(P.q?'<button class="btn small" id="phSrchX">Clear</button>':'')+'</div>'+
-    '<div id="phTop"><p class="muted">Loading…</p></div>'+(P.tab==='map'?'<div id="phMapW"><div id="phMap" class="phmap"></div><div class="setrow" id="phMapBar" style="margin:6px 0"></div></div>':'')+'<div id="phBar"></div>'+(P.tab==='tag'?'<div class="ttwrap '+(P.tag?'res':'tree')+'"><div class="ttree" id="phTree"></div><div class="ttres"><div id="phTH"></div><div id="phTL"></div></div></div>':'<div id="phTL"></div>')+'<div class="scrub" id="phScrub" style="display:none"></div>';
+    '<div id="phTop"><p class="muted">Loading…</p></div>'+(P.tab==='map'?'<div id="phMapW">'+(P.box?'':'<div id="phMap" class="phmap"></div>')+'<div class="setrow" id="phMapBar" style="margin:6px 0"></div></div>':'')+'<div id="phBar"></div>'+(P.tab==='tag'?'<div class="ttwrap '+(P.tag?'res':'tree')+'"><div class="ttree" id="phTree"></div><div class="ttres"><div id="phTH"></div><div id="phTL"></div></div></div>':'<div id="phTL"></div>')+'<div class="scrub" id="phScrub" style="display:none"></div>';
   $('#phSrch').onkeydown=function(e){if(e.key==='Enter'){P.q=this.value.trim();viewPhotos()}};
   $('#phSrch').onsearch=function(){if(!this.value&&P.q){P.q='';viewPhotos()}};
   if($('#phSrchX')) $('#phSrchX').onclick=function(){P.q='';viewPhotos()};
@@ -1879,6 +1948,8 @@ function phLeaflet(){var b='https://cdnjs.cloudflare.com/ajax/libs/';
 function phPoints(){if(P.pts&&Date.now()-P.pts._t<120000)return Promise.resolve(P.pts);
   return call('api_photoPoints').then(function(r){r._t=Date.now();P.pts=r;return r})}
 function phMap(){
+  if(P.box){var mb=$('#phMapBar');if(mb){mb.innerHTML='<button class="btn small" id="mpBack">‹ Back to the map</button><span class="muted" style="font-size:13px">Photos in the area you picked</span>';
+    $('#mpBack').onclick=function(){P.box=null;viewPhotos();window.scrollTo(0,0)}}return}
   var el=$('#phMap'); if(!el) return; el.innerHTML='<p class="muted" style="padding:12px">Loading map…</p>';
   Promise.all([phLeaflet(),phPoints(),phPlaces()]).then(function(r){
     var pts=r[1], pp=r[2]; el=$('#phMap'); if(!el||S.view!=='photos'||P.tab!=='map') return; el.innerHTML='';
@@ -1899,7 +1970,7 @@ function phMap(){
       var mb=$('#phMapBar');if(!mb)return;
       mb.innerHTML='<button class="btn small primary" id="mpShow"'+(n?'':' disabled')+'>Show the '+n+' photo'+(n===1?'':'s')+' in this area</button>'+
         (P.box?'<button class="btn small" id="mpClr">Clear</button><span class="muted" style="font-size:12px">Showing a saved area below — move the map and press Show again to change it</span>':'<span class="muted" style="font-size:12px">Tap a circle to zoom in · '+pts.length+' photos have a location</span>');
-      $('#mpShow').onclick=function(){var b2=map.getBounds();P.box=[b2.getSouth(),b2.getWest(),b2.getNorth(),b2.getEast()].map(function(x){return Math.round(x*1e5)/1e5});P.back=null;viewPhotos()};
+      $('#mpShow').onclick=function(){var b2=map.getBounds();P.box=[b2.getSouth(),b2.getWest(),b2.getNorth(),b2.getEast()].map(function(x){return Math.round(x*1e5)/1e5});P.back=null;viewPhotos();window.scrollTo(0,0)};
       if($('#mpClr'))$('#mpClr').onclick=function(){P.box=null;viewPhotos()}}
     map.on('moveend',bar); bar();
     setTimeout(function(){map.invalidateSize()},100);
@@ -2184,10 +2255,11 @@ function phViewer(id,swapping){
     phPlaces().then(function(){var el=$('#pvLoc');if(!el||!document.body.contains(v))return;var nm=phNamedAt(lat,lng);
       el.innerHTML=(nm?'<button class="chip ghost" data-gl="'+esc(JSON.stringify({named:nm}))+'" title="All photos at this place">⭐ '+esc(nm)+'</button>':'')+
         (p.town?'<button class="chip ghost" data-gl="'+esc(JSON.stringify({region:p.region,town:p.town}))+'" title="All photos from this town">📍 '+esc(p.town)+(p.region?', '+esc(p.region):'')+'</button>':'<span style="opacity:.7;font-size:12px">📍 town being looked up</span>')+
-        '<a class="chip ghost" target="_blank" href="https://www.google.com/maps?q='+lat+','+lng+'" title="Open in Google Maps">Map ↗</a>'+
+        '<button class="chip ghost" id="pvMap" title="Show on the ArNote map">🗺 Map</button>'+
         (nm?'':'<button class="chip ghost" id="pvSp">＋ Save as a place</button>');
       $$('#pvLoc [data-gl]').forEach(function(b){b.onclick=function(){var pl=JSON.parse(b.dataset.gl);close();P.tab='place';P.pl=pl;P.q='';viewPhotos();window.scrollTo(0,0)}});
       if($('#pvSp')) $('#pvSp').onclick=function(){phSavePlace(lat,lng,p.town)};
+      $('#pvMap').onclick=function(){close();P.tab='map';P.box=null;P.mapView={c:{lat:lat,lng:lng},z:17};viewPhotos();window.scrollTo(0,0)};
     }).catch(function(){})})();
   [flat[i+1],flat[i-1]].forEach(function(n){if(n){var pre=new Image();pre.src=phThumbUrl(n.id,2000)}});   // ready before you get there
   function swap(){v.remove();document.removeEventListener('keydown',key)}

@@ -1649,7 +1649,7 @@ function api_photoMonths(o) {
  *  - Anything else stays a normal photo.
  * The note is a linked note pointing at the photo itself, so nothing is copied.
  */
-var RECEIPT_COLS = ['date', 'vendor', 'total', 'tax', 'card', 'category', 'check', 'noteId', 'fileId', 'photo', 'added', 'pay', 'checkNo'];
+var RECEIPT_COLS = ['date', 'vendor', 'total', 'tax', 'card', 'category', 'check', 'noteId', 'fileId', 'photo', 'added', 'pay', 'checkNo', 'billed'];
 
 function receiptSheet_() {
   var sh = ensureSheet_('Receipts', RECEIPT_COLS);
@@ -1925,9 +1925,25 @@ function api_receipts() {
       card: card, pay: pay, checkNo: String(o.checkNo || ''), paid: paid,
       cols: sets.map(function (s) { return tags.filter(function (t) { return s[t]; }); }),
       other: tags.filter(function (t) { return t !== 'Receipt' && !sets.some(function (s) { return s[t]; }); }),
+      billed: o.billed instanceof Date ? Utilities.formatDate(o.billed, tz, 'yyyy-MM-dd') : String(o.billed || '').slice(0, 10),
       check: !o.vendor || !date || total === null });
   });
   return { cols: cfg.cols, cards: cfg.cards, seenCards: Object.keys(seenCards).sort(), rows: rows, url: ss_().getUrl() + '#gid=' + sh.getSheetId() };
+}
+
+/** Mark receipts billed to the customer (date = today) or not billed (on = false). */
+function api_receiptBilled(noteIds, on) {
+  var lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    var sh = receiptSheet_(), n = sh.getLastRow() - 1; if (n < 1) return 0;
+    var k = RECEIPT_COLS.indexOf('noteId'), b = RECEIPT_COLS.indexOf('billed'), want = {}, cnt = 0;
+    (noteIds || []).forEach(function (id) { want[String(id)] = 1; });
+    var rng = sh.getRange(2, b + 1, n, 1), ids = sh.getRange(2, k + 1, n, 1).getValues(), v = rng.getValues();
+    var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    ids.forEach(function (r, i) { if (want[String(r[0])]) { v[i][0] = on ? (typeof on === 'string' ? on.slice(0, 10) : today) : ''; cnt++; } });
+    rng.setNumberFormat('@').setValues(v);
+    return cnt;
+  } finally { lock.releaseLock(); }
 }
 
 /** Fix a receipt's details. f: {date, vendor, total, tax, pay: 'card'|'cash'|'check'|'', card, checkNo} */
