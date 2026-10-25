@@ -1765,13 +1765,13 @@ function phPlaces(force){
 /** Which named place a spot is in (closest circle that contains it). */
 function phNamedAt(lat,lng){var best='',bd=1e12,R=6371000,rd=Math.PI/180;
   ((P.places||{}).places||[]).forEach(function(p){var x=(p.lng-lng)*rd*Math.cos((p.lat+lat)/2*rd),y=(p.lat-lat)*rd,m=Math.sqrt(x*x+y*y)*R;if(m<=p.r&&m<bd){bd=m;best=p.name}});return best}
-var PLACE_SIZES=[[300,'Small','about 300 m across the street — a house and yard, one building'],[1000,'Medium','about 1 km — a farm, a neighbourhood, a job site'],[5000,'Large','about 5 km — a whole town, a lake, a park']];
+var PLACE_SIZES=[[300,'Small','about 300 m across — a house and yard, one building'],[1000,'Medium','about 1 km — a farm, a neighbourhood, a job site'],[5000,'Large','about 5 km — a whole town, a lake, a park']];
 function placeSizeName(r){var s=PLACE_SIZES.filter(function(x){return x[0]===+r})[0];return s?s[1]:(r>=1000?(r/1000)+' km':r+' m')}
 /** Save a spot as a named place: name + size. */
 function phSavePlace(lat,lng,town){
   modal('Save as a place','Photos taken inside the circle show up under this name in Photos → By place. Only the places you save are listed — towns are grouped for you automatically.',
     '<label class="muted" style="font-size:13px">Name</label><input class="field" id="spN" placeholder="e.g. Home, Camp, Smith job" autocomplete="off" value="">'+
-    '<p class="muted" style="font-size:13px;margin:12px 0 4px">How big is it?</p>'+PLACE_SIZES.map(function(s){return '<label class="setrow" style="cursor:pointer;margin:2px 0"><input type="radio" name="spR" value="'+s[0]+'"'+(s[0]===1000?' checked':'')+'><span><b>'+s[1]+'</b> <span class="muted">'+esc(s[2])+'</span></span></label>'}).join('')+
+    '<p class="muted" style="font-size:13px;margin:12px 0 4px">How big is it?</p>'+PLACE_SIZES.map(function(s){return '<label style="display:flex;gap:8px;align-items:center;cursor:pointer;margin:6px 0;font-size:14px"><input type="radio" name="spR" value="'+s[0]+'"'+(s[0]===1000?' checked':'')+' style="margin:0;flex:none"><span><b>'+s[1]+'</b> <span class="muted">'+esc(s[2])+'</span></span></label>'}).join('')+
     (town?'<p class="muted" style="font-size:12px;margin:8px 0 0">Near '+esc(town)+'. You can change the size later in Settings → Places.</p>':''),
     '<span class="grow"></span><button class="btn" id="spC">Cancel</button><button class="btn primary" id="spS">Save</button>');
   setTimeout(function(){var x=$('#spN');if(x)x.focus()},30);
