@@ -1873,14 +1873,14 @@ function phTop(){
 /* ----- Map: every photo with a location, grouped into numbered circles; tap to zoom in, "Show these" lists the area ----- */
 function loadOnce(url,css){var LO=window.LO||(window.LO={});if(LO[url])return LO[url];
   return LO[url]=new Promise(function(res,rej){var el=document.createElement(css?'link':'script');if(css){el.rel='stylesheet';el.href=url}else el.src=url;el.onload=res;el.onerror=function(){delete LO[url];rej(new Error('Could not load the map'))};document.head.appendChild(el)})}
-function leaflet(){var b='https://cdnjs.cloudflare.com/ajax/libs/';
+function phLeaflet(){var b='https://cdnjs.cloudflare.com/ajax/libs/';
   return Promise.all([loadOnce(b+'leaflet/1.9.4/leaflet.min.css',1),loadOnce(b+'leaflet.markercluster/1.5.3/MarkerCluster.css',1),loadOnce(b+'leaflet.markercluster/1.5.3/MarkerCluster.Default.css',1),loadOnce(b+'leaflet/1.9.4/leaflet.min.js')])
     .then(function(){return loadOnce(b+'leaflet.markercluster/1.5.3/leaflet.markercluster.js')})}
 function phPoints(){if(P.pts&&Date.now()-P.pts._t<120000)return Promise.resolve(P.pts);
   return call('api_photoPoints').then(function(r){r._t=Date.now();P.pts=r;return r})}
 function phMap(){
   var el=$('#phMap'); if(!el) return; el.innerHTML='<p class="muted" style="padding:12px">Loading map…</p>';
-  Promise.all([leaflet(),phPoints(),phPlaces()]).then(function(r){
+  Promise.all([phLeaflet(),phPoints(),phPlaces()]).then(function(r){
     var pts=r[1], pp=r[2]; el=$('#phMap'); if(!el||S.view!=='photos'||P.tab!=='map') return; el.innerHTML='';
     var map=L.map(el,{zoomControl:true,worldCopyJump:true}); P.map=map;
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
