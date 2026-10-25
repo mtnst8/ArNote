@@ -1125,7 +1125,7 @@ function syncPhotos_(start) {
         var tk = photoTaken_(f, dir.path), recent = tk && (Date.now() - new Date(tk).getTime()) < 60 * 864e5;   // only new photos get read for receipts/cards
         var gl = (f.imageMediaMetadata || {}).location, hasL = gl && (gl.latitude || gl.longitude);
         add.push([f.id, f.name, tk, f.mimeType, dir.path, /^video\//.test(f.mimeType) ? VIDEO_TAG : '', '', now, md.width || '', md.height || '', recent && /^image\//.test(f.mimeType) ? 'q' : '',
-          hasL ? Math.round(gl.latitude * 1e5) / 1e5 : (/^image\//.test(f.mimeType) ? '-' : '-'), hasL ? Math.round(gl.longitude * 1e5) / 1e5 : '', '', '']);
+          hasL ? Math.round(gl.latitude * 1e5) / 1e5 : (/^image\//.test(f.mimeType) ? '-' : ''), hasL ? Math.round(gl.longitude * 1e5) / 1e5 : '', '', '']);
         known[f.id] = -1;
       });
       token = res.nextPageToken || '';
@@ -1327,7 +1327,7 @@ function api_photoUploadDone(items) {
       var md = f.imageMediaMetadata || f.videoMediaMetadata || {}, recent = tk && (Date.now() - new Date(tk).getTime()) < 60 * 864e5;
       var gl = (f.imageMediaMetadata || {}).location, hasL = gl && (gl.latitude || gl.longitude);
       add.push([f.id, f.name, tk, f.mimeType, 'Phone', /^video\//.test(f.mimeType) ? VIDEO_TAG : '', '', now, md.width || '', md.height || '', /^image\//.test(f.mimeType) ? 'q' : '',
-        hasL ? Math.round(gl.latitude * 1e5) / 1e5 : '-', hasL ? Math.round(gl.longitude * 1e5) / 1e5 : '', '', '']);   // you picked these: read them whatever their date
+        hasL ? Math.round(gl.latitude * 1e5) / 1e5 : (/^image\//.test(f.mimeType) ? '-' : ''), hasL ? Math.round(gl.longitude * 1e5) / 1e5 : '', '', '']);   // you picked these: read them whatever their date
       known[f.id] = 1;
     });
     if (add.length) { if (add.some(function (a) { return a[5]; })) ensureTags_([VIDEO_TAG]); sh.getRange(sh.getLastRow() + 1, 1, add.length, PHOTO_COLS.length).setValues(add); }
@@ -1378,6 +1378,7 @@ function placeOk_(p, o, places) {
   if (o.region && p.region !== o.region) return false;
   if (o.town && p.town !== o.town) return false;
   if (o.nolocation && typeof p.lat === 'number') return false;
+  if (o.box) { var b = o.box; if (typeof p.lat !== 'number' || p.lat < b[0] || p.lat > b[2] || p.lng < b[1] || p.lng > b[3]) return false; }   // map area [south, west, north, east]
   if (o.named) { if (typeof p.lat !== 'number' || namedAt_(p.lat, p.lng, places) !== o.named) return false; }
   if (o.q) {
     var hay = [p.name, p.tags.join(' '), p.town, p.region, p.folder, typeof p.lat === 'number' ? namedAt_(p.lat, p.lng, places) : ''].join(' ').toLowerCase();
@@ -1389,7 +1390,7 @@ function placeOk_(p, o, places) {
 function api_photoPlaces() {
   var rows = photoRows_(), places = placesList_(), regions = {}, named = {}, withLoc = 0, pending = 0, none = 0;
   rows.forEach(function (p) {
-    if (p.lat === '') { if (/^image\//.test(p.mime)) pending++; return; }
+    if (p.lat === '') { pending++; return; }
     if (typeof p.lat !== 'number') { none++; return; }
     withLoc++;
     if (p.town) { var g = regions[p.region] = regions[p.region] || {}; g[p.town] = (g[p.town] || 0) + 1; }
@@ -1397,25 +1398,78 @@ function api_photoPlaces() {
   });
   return { regions: regions, named: named, places: places, withLoc: withLoc, none: none, pending: pending };
 }
-/** Background work: read GPS for photos not checked yet, then name the towns. Safe to run repeatedly. */
+/** Every photo with a location, for the map: [id, lat, lng, 1 if video]. */
+function api_photoPoints() {
+  var out = [];
+  photoRows_().forEach(function (p) { if (typeof p.lat === 'number') out.push([p.id, p.lat, p.lng, /^video\//.test(p.mime) ? 1 : 0]); });
+  return out;
+}
+
+/* ---------- Video locations: phones write the spot inside the video file (MP4/MOV 'moov' box, e.g. "+39.1234-079.5678/").
+ * Only the box headers and the small udta/meta boxes are read with ranged downloads, never the whole video. ---------- */
+function rangeBytes_(id, a, b, tok) {
+  var r = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id) + '?alt=media&supportsAllDrives=true',
+    { headers: { Authorization: 'Bearer ' + tok, Range: 'bytes=' + a + '-' + b }, muteHttpExceptions: true });
+  var c = r.getResponseCode(); if (c !== 206 && c !== 200) throw new Error('read ' + c);
+  return r.getContent();
+}
+/** Where a phone video was taken: look for the location tag ("©xyz", or Apple's ISO6709 key) in the last, then first, 256 KB. Two small reads at most. */
+function videoLoc_(id, size, tok) {
+  var W = 262144, tries = size > W ? [[size - W, size - 1], [0, W - 1]] : [[0, Math.max(0, size - 1)]];
+  for (var t = 0; t < tries.length; t++) {
+    var b = rangeBytes_(id, tries[t][0], tries[t][1], tok), s = '';
+    for (var i = 0; i < b.length; i += 8192) s += String.fromCharCode.apply(null, b.slice(i, i + 8192).map(function (x) { return x & 255; }));
+    var k = s.indexOf('©xyz'), seg = k >= 0 ? s.slice(k, k + 60) : '';
+    if (!seg) { k = s.indexOf('ISO6709'); seg = k >= 0 ? s.slice(k, k + 400) : ''; }
+    var m = seg.match(/([+-]\d{1,2}\.\d{2,})([+-]\d{1,3}\.\d{2,})/);
+    if (m && (+m[1] || +m[2]) && Math.abs(+m[1]) <= 90 && Math.abs(+m[2]) <= 180) return { lat: Math.round(+m[1] * 1e5) / 1e5, lng: Math.round(+m[2] * 1e5) / 1e5 };
+  }
+  return null;
+}
+
+/**
+ * Background work: find GPS for photos and videos not checked yet, then name the towns. Safe to run repeatedly.
+ * Photos: Drive is listed 1,000 files per call with their locations (one outside call per 1,000, not one per photo).
+ * Videos: two small reads each. Towns: one lookup per ~2 km square, cached.
+ */
 function geoWork_(start, budget) {
   start = start || Date.now(); budget = budget || 60000;
   var sh = photoSheet_(), n = sh.getLastRow() - 1; if (n < 1) return { coords: 0, named: 0, left: 0 };
-  var C = PHOTO_COLS.indexOf('lat'), v = sh.getRange(2, 1, n, PHOTO_COLS.length).getValues(), tok = ScriptApp.getOAuthToken(), dirty = false, coords = 0, named = 0;
-  var need = [];
-  v.forEach(function (r, i) { if (r[C] === '') { if (/^image\//.test(r[3])) need.push(i); else { r[C] = '-'; dirty = true; } } });
-  for (var k = 0; k < need.length && Date.now() - start < budget * 0.6; k += 40) {
-    var part = need.slice(k, k + 40);
-    UrlFetchApp.fetchAll(part.map(function (i) {
-      return { url: 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(v[i][0]) + '?supportsAllDrives=true&fields=imageMediaMetadata(location)', headers: { Authorization: 'Bearer ' + tok }, muteHttpExceptions: true };
-    })).forEach(function (r, j) {
-      var i = part[j], code = r.getResponseCode(), loc = null;
-      if (code !== 200 && code !== 404) return;                      // try again next time
-      try { loc = code === 200 ? (JSON.parse(r.getContentText()).imageMediaMetadata || {}).location : null; } catch (e) {}
-      if (loc && (loc.latitude || loc.longitude)) { v[i][C] = Math.round(loc.latitude * 1e5) / 1e5; v[i][C + 1] = Math.round(loc.longitude * 1e5) / 1e5; coords++; }
-      else v[i][C] = '-';
-      dirty = true;
-    });
+  var C = PHOTO_COLS.indexOf('lat'), v = sh.getRange(2, 1, n, PHOTO_COLS.length).getValues(), tok = ScriptApp.getOAuthToken(), dirty = false, coords = 0, named = 0, pr = props_();
+  if (!pr.getProperty('vidGeo1')) {           // once: videos were skipped before; check them now
+    v.forEach(function (r) { if (/^video\//.test(r[3]) && r[C] === '-') { r[C] = ''; dirty = true; } });
+    pr.setProperty('vidGeo1', '1');
+  }
+  var want = {}, nWant = 0, vids = [];
+  v.forEach(function (r, i) { if (r[C] === '') { if (/^(image|video)\//.test(r[3])) { want[r[0]] = i; nWant++; } else { r[C] = '-'; dirty = true; } } });
+  if (nWant) {
+    var pt = pr.getProperty('geoPage') || '', fromStart = !pt, q = "(mimeType contains 'image/' or mimeType contains 'video/') and trashed = false";
+    do {
+      var res = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files?pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true&q=' + encodeURIComponent(q) +
+        '&fields=' + encodeURIComponent('nextPageToken,files(id,mimeType,size,imageMediaMetadata(location))') + (pt ? '&pageToken=' + encodeURIComponent(pt) : ''),
+        { headers: { Authorization: 'Bearer ' + tok }, muteHttpExceptions: true });
+      if (res.getResponseCode() !== 200) { pt = ''; fromStart = false; break; }
+      var js = JSON.parse(res.getContentText());
+      (js.files || []).forEach(function (f) {
+        var i = want[f.id]; if (i === undefined) return;
+        delete want[f.id]; nWant--;
+        if (/^video\//.test(f.mimeType)) { vids.push([i, +f.size || 0]); return; }
+        var loc = (f.imageMediaMetadata || {}).location;
+        if (loc && (loc.latitude || loc.longitude)) { v[i][C] = Math.round(loc.latitude * 1e5) / 1e5; v[i][C + 1] = Math.round(loc.longitude * 1e5) / 1e5; coords++; }
+        else v[i][C] = '-';
+        dirty = true;
+      });
+      pt = js.nextPageToken || '';
+    } while (pt && nWant > 0 && Date.now() - start < budget * 0.4);
+    pr.setProperty('geoPage', pt);                                         // carry on from here next time ('' = from the start)
+    if (!pt && fromStart) Object.keys(want).forEach(function (id) {        // a full pass didn't find it (deleted or not readable)
+      var i = want[id]; if (!/^video\//.test(v[i][3])) { v[i][C] = '-'; dirty = true; } });
+  }
+  for (var q2 = 0; q2 < vids.length && Date.now() - start < budget * 0.75; q2++) {
+    var vi = vids[q2][0], loc2 = null;
+    try { loc2 = vids[q2][1] ? videoLoc_(v[vi][0], vids[q2][1], tok) : null; } catch (e) { if (/invoked too many times/i.test(String(e))) break; continue; }
+    if (loc2) { v[vi][C] = loc2.lat; v[vi][C + 1] = loc2.lng; coords++; } else v[vi][C] = '-';
+    dirty = true;
   }
   var cache = geoCache_(), miss = {}, stop = false;
   v.forEach(function (r, i) {
@@ -1433,7 +1487,7 @@ function geoWork_(start, budget) {
   });
   cache.save();
   if (dirty) sh.getRange(2, C + 1, n, 4).setValues(v.map(function (r) { return [r[C], r[C + 1], r[C + 2], r[C + 3]]; }));
-  var left = v.filter(function (r) { return r[C] === '' && /^image\//.test(r[3]); }).length + v.filter(function (r) { return typeof r[C] === 'number' && !r[C + 2]; }).length;
+  var left = v.filter(function (r) { return r[C] === ''; }).length + v.filter(function (r) { return typeof r[C] === 'number' && !r[C + 2]; }).length;
   return { coords: coords, named: named, left: left };
 }
 function api_geoRun() {

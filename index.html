@@ -164,6 +164,10 @@ body.phsel .toast{bottom:calc(var(--phBarH,60px) + 14px)}
 @media (max-width:600px){.wide.photosv{padding-right:44px}.scrub{width:40px}.scrub .bub{right:38px}}
 .phv{position:fixed;inset:0;z-index:60;background:#0b0b0d;display:flex;flex-direction:column;color:#eee}
 .phv .top{display:flex;gap:8px;align-items:center;padding:10px 14px;flex-wrap:wrap}.phv .top .grow{flex:1}
+.phmap{height:58vh;min-height:300px;border-radius:10px;overflow:hidden;margin-top:6px;background:#222}
+.phpin{background:none;border:none}.phpin img{width:44px;height:44px;object-fit:cover;border-radius:8px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5);background:#444}
+.phpin span{position:absolute;right:3px;bottom:2px;color:#fff;font-size:11px;text-shadow:0 0 3px #000}
+.phstar{background:rgba(0,0,0,.65);color:#fff;border-radius:10px;padding:2px 7px;font-size:12px;white-space:nowrap;width:auto!important;height:auto!important}
 .pvloc{display:flex;gap:4px;flex-wrap:wrap;align-items:center}.pvloc .chip{color:#fff;border-color:rgba(255,255,255,.35);background:transparent;text-decoration:none;font-size:12px}
 .phv .img{flex:1;display:flex;align-items:center;justify-content:center;min-height:0;position:relative}
 .phv .img img{max-width:100%;max-height:100%;object-fit:contain}
@@ -1755,8 +1759,8 @@ function phStats(force){
 function phTagCount(t){var st=P.stats||{tags:{}},n=0;descendants(t).forEach(function(x){n+=st.tags[x]||0});return n}
 function phQ(){var pl=P.tab==='place'?(P.pl||{}):{};
   return {view:P.tab==='untagged'?'untagged':'all',exact:P.tab==='tag'&&!!P.tag&&S.tt.exact,tag:P.tab==='tag'?P.tag:'',folder:P.tab==='folder'?P.folder:'',
-    region:pl.region||'',town:pl.town||'',named:pl.named||'',nolocation:!!pl.none,q:P.q||''}}
-function phKey(){return P.tab+'|'+P.tag+'|'+P.folder+'|'+JSON.stringify(P.pl||{})+'|'+(P.q||'')}
+    region:pl.region||'',town:pl.town||'',named:pl.named||'',nolocation:!!pl.none,q:P.q||'',box:P.tab==='map'&&P.box?P.box:null}}
+function phKey(){return P.tab+'|'+P.tag+'|'+P.folder+'|'+JSON.stringify(P.pl||{})+'|'+(P.q||'')+'|'+JSON.stringify(P.tab==='map'?P.box||0:0)}
 function phPlaceSel(){var pl=P.pl||{};return !!(pl.region||pl.named||pl.none)}
 function phPlaces(force){
   if(P.places&&!force&&Date.now()-P.places._t<60000) return Promise.resolve(P.places);
@@ -1790,7 +1794,7 @@ function viewPhotos(){
   document.documentElement.style.setProperty('--phTop',(hr&&hr.width>window.innerWidth*0.7&&/sticky|fixed/.test(getComputedStyle(hd).position)?Math.round(hr.height):0)+'px');
   $('#main').innerHTML='<div class="lhead"><h2>Photos</h2><span class="muted" id="phSync" style="font-size:12px"></span><button class="btn small primary" id="phAdd" title="Pick photos or videos from this device">＋ Add photos</button><button class="btn small" id="phNow">Check for new</button><input type="file" id="phFile" accept="image/*,video/*" multiple hidden></div>'+
     '<div class="setrow" style="margin:6px 0 0"><input class="field" id="phSrch" type="search" placeholder="🔍 Search photos — a town, place, tag or file name" autocomplete="off" style="margin:0;max-width:420px" value="'+esc(P.q||'')+'">'+(P.q?'<button class="btn small" id="phSrchX">Clear</button>':'')+'</div>'+
-    '<div id="phTop"><p class="muted">Loading…</p></div><div id="phBar"></div>'+(P.tab==='tag'?'<div class="ttwrap '+(P.tag?'res':'tree')+'"><div class="ttree" id="phTree"></div><div class="ttres"><div id="phTH"></div><div id="phTL"></div></div></div>':'<div id="phTL"></div>')+'<div class="scrub" id="phScrub" style="display:none"></div>';
+    '<div id="phTop"><p class="muted">Loading…</p></div>'+(P.tab==='map'?'<div id="phMapW"><div id="phMap" class="phmap"></div><div class="setrow" id="phMapBar" style="margin:6px 0"></div></div>':'')+'<div id="phBar"></div>'+(P.tab==='tag'?'<div class="ttwrap '+(P.tag?'res':'tree')+'"><div class="ttree" id="phTree"></div><div class="ttres"><div id="phTH"></div><div id="phTL"></div></div></div>':'<div id="phTL"></div>')+'<div class="scrub" id="phScrub" style="display:none"></div>';
   $('#phSrch').onkeydown=function(e){if(e.key==='Enter'){P.q=this.value.trim();viewPhotos()}};
   $('#phSrch').onsearch=function(){if(!this.value&&P.q){P.q='';viewPhotos()}};
   if($('#phSrchX')) $('#phSrchX').onclick=function(){P.q='';viewPhotos()};
@@ -1804,11 +1808,11 @@ function viewPhotos(){
       $('#phTop').innerHTML='<div class="wg" style="margin-top:10px"><p style="margin-top:0"><b>No photos yet.</b> ArNote shows the photos in your Drive folder <a href="'+esc(st.rootUrl)+'" target="_blank" style="color:var(--acc)">ArNote Photos</a> (and every folder inside it). They stay there; ArNote just keeps your tags.</p>'+
         '<ul class="muted" style="font-size:14px;margin:0;padding-left:18px"><li><b>Your existing photos:</b> export them with Google Takeout and copy the folders into ArNote Photos.</li><li><b>New phone photos:</b> a sync app (Autosync for Google Drive or FolderSync on Android) copying your camera folder to ArNote Photos/Phone.</li><li>New photos are picked up every 15 minutes, or press <b>Check for new</b>.</li></ul></div>';
       return }
-    phTop(); var show=!(P.tab==='tag'&&!P.tag)&&!(P.tab==='place'&&!phPlaceSel()&&!P.q); if(show) phTimeline(); else {$('#phTL').innerHTML='';$('#phScrub').style.display='none'} phPaint();
+    phTop(); var show=!(P.tab==='tag'&&!P.tag)&&!(P.tab==='place'&&!phPlaceSel()&&!P.q)&&!(P.tab==='map'&&!P.box); if(P.tab==='map') phMap(); if(show) phTimeline(); else {$('#phTL').innerHTML='';$('#phScrub').style.display='none'} phPaint();
   }).catch(function(){$('#phTop').innerHTML='<p class="muted">Could not load photos.</p>'});
 }
 function phTop(){
-  var st=P.stats, tabs=[['all','All',st.total],['untagged','Untagged',st.untagged],['tag','By tag'],['place','By place'],['folder','By folder']];
+  var st=P.stats, tabs=[['all','All',st.total],['untagged','Untagged',st.untagged],['tag','By tag'],['place','By place'],['map','Map'],['folder','By folder']];
   var h='<div class="tabs" id="phTabs" style="margin:10px 0 4px">'+tabs.map(function(t){return '<button data-t="'+t[0]+'"'+(P.tab===t[0]?' class="on"':'')+'>'+t[1]+(t[2]!=null?' <span class="muted">'+t[2]+'</span>':'')+'</button>'}).join('')+'</div>';
   if(P.tab==='tag'){
     if(P.tag&&!S.parent.hasOwnProperty(P.tag)) P.tag='';
@@ -1865,6 +1869,46 @@ function phTop(){
   $$('#phTop [data-pt]').forEach(function(b){b.onclick=function(){P.tag=b.dataset.pt;viewPhotos()}});
   bindNewTag(function(){phTop()});
   $$('#phTop [data-pf]').forEach(function(b){b.onclick=function(){P.folder=b.dataset.pf;viewPhotos()}});
+}
+/* ----- Map: every photo with a location, grouped into numbered circles; tap to zoom in, "Show these" lists the area ----- */
+function loadOnce(url,css){var LO=window.LO||(window.LO={});if(LO[url])return LO[url];
+  return LO[url]=new Promise(function(res,rej){var el=document.createElement(css?'link':'script');if(css){el.rel='stylesheet';el.href=url}else el.src=url;el.onload=res;el.onerror=function(){delete LO[url];rej(new Error('Could not load the map'))};document.head.appendChild(el)})}
+function leaflet(){var b='https://cdnjs.cloudflare.com/ajax/libs/';
+  return Promise.all([loadOnce(b+'leaflet/1.9.4/leaflet.min.css',1),loadOnce(b+'leaflet.markercluster/1.5.3/MarkerCluster.css',1),loadOnce(b+'leaflet.markercluster/1.5.3/MarkerCluster.Default.css',1),loadOnce(b+'leaflet/1.9.4/leaflet.min.js')])
+    .then(function(){return loadOnce(b+'leaflet.markercluster/1.5.3/leaflet.markercluster.js')})}
+function phPoints(){if(P.pts&&Date.now()-P.pts._t<120000)return Promise.resolve(P.pts);
+  return call('api_photoPoints').then(function(r){r._t=Date.now();P.pts=r;return r})}
+function phMap(){
+  var el=$('#phMap'); if(!el) return; el.innerHTML='<p class="muted" style="padding:12px">Loading map…</p>';
+  Promise.all([leaflet(),phPoints(),phPlaces()]).then(function(r){
+    var pts=r[1], pp=r[2]; el=$('#phMap'); if(!el||S.view!=='photos'||P.tab!=='map') return; el.innerHTML='';
+    var map=L.map(el,{zoomControl:true,worldCopyJump:true}); P.map=map;
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+    var cl=L.markerClusterGroup({showCoverageOnHover:false,maxClusterRadius:60,spiderfyOnMaxZoom:true});
+    pts.forEach(function(p){
+      var m=L.marker([p[1],p[2]],{icon:L.divIcon({className:'phpin',html:'<img loading="lazy" src="'+phThumbUrl(p[0],120)+'">'+(p[3]?'<span>▶</span>':''),iconSize:[44,44]})});
+      m.on('click',function(){phMapOpen(p)}); cl.addLayer(m)});
+    map.addLayer(cl);
+    (pp.places||[]).forEach(function(q){L.circle([q.lat,q.lng],{radius:q.r,color:'#e6b422',weight:1,fillOpacity:.08}).addTo(map);
+      L.marker([q.lat,q.lng],{icon:L.divIcon({className:'phstar',html:'⭐ '+esc(q.name),iconSize:null}),interactive:false}).addTo(map)});
+    if(P.mapView) map.setView(P.mapView.c,P.mapView.z);
+    else if(pts.length) map.fitBounds(L.latLngBounds(pts.map(function(p){return [p[1],p[2]]})),{padding:[20,20]});
+    else map.setView([38.9,-79.8],6);
+    function bar(){var b=map.getBounds(),n=0;pts.forEach(function(p){if(b.contains([p[1],p[2]]))n++});
+      P.mapView={c:map.getCenter(),z:map.getZoom()};
+      var mb=$('#phMapBar');if(!mb)return;
+      mb.innerHTML='<button class="btn small primary" id="mpShow"'+(n?'':' disabled')+'>Show the '+n+' photo'+(n===1?'':'s')+' in this area</button>'+
+        (P.box?'<button class="btn small" id="mpClr">Clear</button><span class="muted" style="font-size:12px">Showing a saved area below — move the map and press Show again to change it</span>':'<span class="muted" style="font-size:12px">Tap a circle to zoom in · '+pts.length+' photos have a location</span>');
+      $('#mpShow').onclick=function(){var b2=map.getBounds();P.box=[b2.getSouth(),b2.getWest(),b2.getNorth(),b2.getEast()].map(function(x){return Math.round(x*1e5)/1e5});P.back=null;viewPhotos()};
+      if($('#mpClr'))$('#mpClr').onclick=function(){P.box=null;viewPhotos()}}
+    map.on('moveend',bar); bar();
+    setTimeout(function(){map.invalidateSize()},100);
+  }).catch(function(e){var x=$('#phMap');if(x)x.innerHTML='<p class="muted" style="padding:12px">'+esc(e.message||'Map not available')+'</p>'});
+}
+/** Open a photo from the map. */
+function phMapOpen(p){
+  if(P.byId[p[0]]){phViewer(p[0]);return}
+  var d=0.00002; call('api_photos',{view:'all',box:[p[1]-d,p[2]-d,p[1]+d,p[2]+d],limit:50}).then(function(r){r.items.forEach(function(x){P.byId[x.id]=x});if(P.byId[p[0]])phViewer(p[0])}).catch(function(e){toast(e.message)});
 }
 /* ----- timeline ----- */
 function phCols(){var w=($('#phTL')||{}).clientWidth||800;if(window.innerWidth<=600)return 3;return Math.max(2,Math.floor((w+4)/(150+4)))}
