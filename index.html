@@ -29,6 +29,7 @@ nav button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
 main{max-width:900px;margin:0 auto;padding:12px 14px 120px}
 h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--mute);margin:0}
 .lhead{display:flex;align-items:center;gap:8px;margin:18px 0 8px}.lhead h2{flex:1}
+.rcpick #ppt .trow[data-tag=""]{display:none}
 .rcf{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 10px}
 .rcf select,.rcf input{padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:inherit;font-size:14px}
 .rcf #rcQ{width:140px}
@@ -1565,7 +1566,7 @@ function drawRcSet(){
     d.cols.forEach(function(c){if(parents.indexOf(c.parent)<0)parents.push(c.parent)});             // keep a chosen parent even if it has no sub-tags yet
     parents.sort(function(a,b){return a.localeCompare(b)});
     var cols=d.cols.slice(); while(cols.length<3) cols.push({name:'',parent:''});
-    var sel=function(i,cur){return '<select class="field" data-rcp="'+i+'" style="max-width:240px"><option value="">— parent tag —</option>'+parents.map(function(p){return '<option'+(p===cur?' selected':'')+'>'+esc(p)+'</option>'}).join('')+'</select>'};
+    var sel=function(i,cur){return '<input type="hidden" data-rcp="'+i+'" value="'+esc(cur||'')+'"><button class="btn small" data-rcpb="'+i+'" title="Pick from your tag tree">'+(cur?'🏷 '+esc(tagPath(cur)):'Choose parent tag…')+'</button>'};
     var cards=d.seenCards.concat(Object.keys(d.cards)).filter(function(c,i,a){return a.indexOf(c)===i}).sort();
     el.innerHTML='<div class="setrow"><span>'+ty.length+' receipt'+(ty.length===1?'':'s')+' this year · '+money(ty.reduce(function(s,r){return s+(+r.total||0)},0))+'</span><button class="btn small" id="rcGo">Open Receipts</button></div>'+
       '<p style="margin:8px 0 4px"><b style="color:var(--ink)">Report columns</b> — each one shows the tags under a parent tag you pick (e.g. Job → your “Jobs” tag, Category → “Expense Categories”).</p>'+
@@ -1575,6 +1576,15 @@ function drawRcSet(){
       '<div class="setrow"><input class="field" id="rcNewC" placeholder="Card last 4" maxlength="4" inputmode="numeric" style="max-width:110px"><input class="field" id="rcNewN" placeholder="Name" style="max-width:180px"><button class="btn small" id="rcAddC">Add card</button></div>'+
       '<div class="setrow"><span class="grow"></span><button class="btn small primary" id="rcSaveCfg">Save</button></div>';
     $('#rcGo').onclick=function(){go('receipts')};
+    $$('#rcpt [data-rcpb]').forEach(function(b){b.onclick=function(){var i=b.dataset.rcpb,h=$('[data-rcp="'+i+'"]'),nm=$('[data-rcn="'+i+'"]').value.trim()||'this column';
+      var shd=modal('Tag for “'+esc(nm)+'”','Receipts tagged with anything under this tag fill the column.',parentPicker(),
+        '<button class="btn" id="ppClr">Clear</button><span class="grow"></span><button class="btn" id="ppX">Cancel</button><button class="btn primary" id="ppOk">Use this tag</button>');
+      shd.classList.add('rcpick'); bindParentPicker(null,h.value); if(!h.value) $('#ppCur').textContent='(none yet)';
+      $('#ppX').onclick=closeModal;
+      $('#ppClr').onclick=function(){h.value='';b.textContent='Choose parent tag…';closeModal()};
+      $('#ppOk').onclick=function(){var v=$('#dp').value;if(!v){toast('Pick a tag first');return}h.value=v;b.textContent='🏷 '+tagPath(v);closeModal();
+        var n=$('[data-rcn="'+i+'"]');if(!n.value.trim())n.value=v.replace(/^[^A-Za-z0-9]+/,'')};
+    }});
     function collect(){var cs=[0,1,2].map(function(i){return {name:$('[data-rcn="'+i+'"]').value.trim(),parent:$('[data-rcp="'+i+'"]').value}}).filter(function(c){return c.name&&c.parent});
       var cd={};$$('#rcpt [data-rcc]').forEach(function(x){if(x.value.trim())cd[x.dataset.rcc]=x.value.trim()});return {cols:cs,cards:cd}}
     function save(cfg,b){if(b)b.disabled=true;call('api_receiptCfg',cfg).then(function(){toast('Receipt settings saved');drawRcSet()}).catch(function(){if(b)b.disabled=false})}
