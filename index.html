@@ -1304,7 +1304,7 @@ function viewNote(id,keep){
       (isTriage?'<button class="btn" id="skip">Skip</button>':'')+
       (n.link?'<a class="btn" target="_blank" id="odocs" href="'+linkUrl(n)+'">Open in Drive ↗</a>':
         '<a class="btn" target="_blank" id="odocs" href="'+docUrl(n.docId,true)+'">Edit in Google Docs ↗</a><button class="btn" id="ehere">Edit here</button>'+
-        (n.sourceUrl?'<a class="btn" target="_blank" href="'+esc(n.sourceUrl)+'">Source</a>':''))+
+        (n.sourceUrl?'<a class="btn" target="_blank" href="'+esc(n.sourceUrl)+'">'+(/mail\.google\.com/.test(n.sourceUrl)?'Open in Gmail':'Source')+'</a>':''))+
       '<button class="btn" id="nprint">🖨 Print</button>'+
       '<button class="btn danger" id="del">'+(n.link?'Remove link':'Delete')+'</button></div>'+
     '<div id="nloc"></div><div class="atts" id="atts"></div>'+
@@ -1400,6 +1400,7 @@ function viewSettings(){
     '<h3 style="margin:16px 0 4px;font-size:15px">Add another device</h3>'+
     '<p class="muted" style="margin:0 0 8px;font-size:13px">Open this pairing link on your phone or another computer (email it to yourself). Anyone with this link can open your notes — keep it private.</p>'+
     '<div class="setrow"><button class="btn primary" id="cpPair">Copy pairing link</button>'+(navigator.share?'<button class="btn" id="shPair">Share…</button>':'')+'</div>'+
+    '<h3 style="margin:16px 0 4px;font-size:15px">Email to ArNote</h3><div id="mset" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Receipts</h3><div id="rcpt" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Shared links</h3><div id="sset" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Google accounts</h3><div id="acct" class="muted" style="font-size:13px">Loading…</div>'+
@@ -1409,6 +1410,7 @@ function viewSettings(){
     '<p class="muted" style="font-size:12px;margin-top:14px">ArNote · your notes stay in your own Google Drive.</p></div>';
   $('#cpPair').onclick=function(){var l=pairLink();(navigator.clipboard?navigator.clipboard.writeText(l):Promise.reject()).then(function(){toast('Pairing link copied')}).catch(function(){prompt('Copy this link:',l)})};
   if($('#shPair')) $('#shPair').onclick=function(){navigator.share({title:'ArNote pairing link',text:pairLink()}).catch(function(){})};
+  drawMailSet();
   call('api_linkedFolders').then(function(fs){var el=$('#lfold');if(!el)return;
     el.innerHTML=fs.length?fs.map(function(f){return '<div class="setrow"><span>📁 '+esc(f.name)+'</span><button class="btn small" data-uw="'+esc(f.id)+'">Stop syncing</button></div>'}).join('')+
       '<p style="margin:4px 0 0">New files in these folders are added to the Cabinet every 15 minutes. Stopping keeps the notes already made.</p>':'None yet. Link a folder from Inbox → 🔗 Link Drive files.';
@@ -1432,6 +1434,23 @@ function viewSettings(){
   $('#unpair').onclick=function(){var b=this;if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Tap again to unpair';return}saveCfg(null);try{Object.keys(localStorage).forEach(function(k){if(/^arnote\.nv/.test(k))localStorage.removeItem(k)})}catch(e){}location.hash='';location.reload()};
 }
 
+/* ---------- email → ArNote settings ---------- */
+function drawMailSet(){
+  call('api_mailInfo').then(function(mi){var el=$('#mset');if(!el)return;
+    el.innerHTML='<p style="margin:0 0 6px">Send or forward email to <b class="mono" style="color:var(--ink)">'+esc(mi.address)+'</b>, or put the Gmail label <b style="color:var(--ink)">ArNote</b> on any email. It becomes an Inbox note within 15 minutes (subject = title, attachments included). Add tags in the subject with # — e.g. <i>Boiler quote #HVAC</i> (tags must already exist).</p>'+
+      '<div class="setrow"><button class="btn small primary" id="mCopy">Copy address</button><button class="btn small" id="mNow">Check now</button>'+(mi.last?'<span>Last email note: '+fmt(mi.last.at)+'</span>':'')+'</div>'+
+      '<p style="margin:10px 0 4px"><b style="color:var(--ink)">Accepted senders</b> — email to that address from anyone else is ignored (the Gmail label works for any email):</p>'+
+      mi.senders.map(function(s){return '<div class="setrow"><span class="mono">'+esc(s)+'</span>'+(s===mi.me?'<span>(this account)</span>':'<button class="btn small" data-mrm="'+esc(s)+'">Remove</button>')+'</div>'}).join('')+
+      '<div class="setrow"><input class="field" id="mAdd" placeholder="another address you send from" autocomplete="off" style="max-width:300px;margin:0"><button class="btn small" id="mAddB">Add</button></div>';
+    $('#mCopy').onclick=function(){copyText(mi.address,'Address copied')};
+    $('#mNow').onclick=function(){var b=this;b.disabled=true;b.textContent='Checking…';
+      call('api_mailCheckNow').then(function(r){toast(r.added?r.added+' email note'+(r.added>1?'s':'')+' added to Inbox':'No new email for ArNote');if(r.added)load(true).then(refreshInboxCount)}).catch(function(){}).then(function(){b.disabled=false;b.textContent='Check now'})};
+    function save(list){call('api_setMailSenders',list.filter(function(x){return x!==mi.me})).then(function(){drawMailSet()})}
+    $$('#mset [data-mrm]').forEach(function(b){b.onclick=function(){save(mi.senders.filter(function(x){return x!==b.dataset.mrm}))}});
+    $('#mAddB').onclick=function(){var v=$('#mAdd').value.trim().toLowerCase();if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)){toast('That doesn\'t look like an email address');return}save(mi.senders.concat([v]))};
+    $('#mAdd').onkeydown=function(e){if(e.key==='Enter')$('#mAddB').click()};
+  }).catch(function(e){var el=$('#mset');if(el)el.textContent='Not available yet ('+e.message+').'});
+}
 /* ---------- sharing a tag with other people (read-only links, no Google account needed) ---------- */
 function b64u(s){return btoa(unescape(encodeURIComponent(s))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
 function shareUrl(token){return location.origin+location.pathname+'#share='+b64u(CFG.api+'|'+token)}

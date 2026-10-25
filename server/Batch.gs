@@ -206,6 +206,7 @@ function processDrop() {
     }
     try { made = made.concat(processLinks_(start)); } catch (e) { Logger.log('Links: ' + e); }
     try { syncPhotos_(Date.now() - 60000); } catch (e) { Logger.log('Photos: ' + e); }
+    try { if (Date.now() - start < 200000) processMail_(Date.now(), 40000); } catch (e) { Logger.log('Mail: ' + e); }
     try { scanQueue_(90000); } catch (e) { Logger.log('Scan: ' + e); }
     try { if (Date.now() - start < 250000) photoDedupe_(40000); } catch (e) { Logger.log('Dedupe: ' + e); }
   } finally { lock.releaseLock(); }
@@ -603,6 +604,103 @@ function linkedPreviewHtml_(id, meta) {
       (/^image\//.test(meta.mimeType) ? '' : '<p style="color:#888">Preview of the first page · open the file to see all of it</p>')
       : '<p style="margin-top:40px">No preview for this kind of file.<br>Use “Open in Drive” to see it.</p>') +
     '<p style="color:#888;font-size:12px">' + name + '</p></body></html>';
+}
+
+/* ---------------- Email → ArNote ----------------
+ * Two ways in: send/forward to <you>+arnote@<domain> (only from allowed senders), or put the Gmail label "ArNote" on any email.
+ * Each email becomes an Inbox note (subject = title, the email = body, attachments attached, #Tags in the subject applied).
+ * Done threads get the label "ArNote/Saved" and are archived.
+ */
+function mailAddress_() { var e = Session.getEffectiveUser().getEmail(), i = e.indexOf('@'); return e.slice(0, i) + '+arnote' + e.slice(i); }
+function mailSenders_() {
+  var v = []; try { v = JSON.parse(props_().getProperty('mailSenders') || '[]'); } catch (e) {}
+  var me = Session.getEffectiveUser().getEmail().toLowerCase(); if (v.indexOf(me) < 0) v.unshift(me);
+  return v;
+}
+function api_mailInfo() {
+  var last = null; try { last = JSON.parse(props_().getProperty('mailLast') || 'null'); } catch (e) {}
+  return { address: mailAddress_(), senders: mailSenders_(), me: Session.getEffectiveUser().getEmail().toLowerCase(), last: last };
+}
+function api_setMailSenders(list) {
+  var clean = (list || []).map(function (s) { return String(s).trim().toLowerCase(); }).filter(function (s) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s); });
+  props_().setProperty('mailSenders', JSON.stringify(clean.filter(function (s, i) { return clean.indexOf(s) === i; })));
+  return mailSenders_();
+}
+function api_mailCheckNow() {
+  var lock = LockService.getScriptLock(); if (!lock.tryLock(20000)) throw new Error('ArNote is busy; try again in a minute');
+  try { return processMail_(Date.now(), 150000); } finally { lock.releaseLock(); }
+}
+/** Run once in the script editor to approve Gmail access. */
+function authorizeMail() { GmailApp.getUserLabelByName('ArNote'); return mailAddress_(); }
+
+function mailLabel_(name) { return GmailApp.getUserLabelByName(name) || GmailApp.createLabel(name); }
+
+function processMail_(start, budget) {
+  start = start || Date.now(); budget = budget || 60000;
+  var addr = mailAddress_(), ok = {}, made = [];
+  mailSenders_().forEach(function (s) { ok[s] = 1; });
+  var inLabel = mailLabel_('ArNote'), saved = mailLabel_('ArNote/Saved');
+  var threads = GmailApp.search('(to:' + addr + ' OR deliveredto:' + addr + ') -label:arnote-saved', 0, 15).concat(GmailApp.search('label:arnote -label:arnote-saved', 0, 15));
+  var seen = {};
+  threads.forEach(function (th) {
+    if (seen[th.getId()] || Date.now() - start > budget) return; seen[th.getId()] = 1;
+    var labelled = th.getLabels().some(function (l) { return l.getName() === 'ArNote'; });
+    var msgs = th.getMessages().filter(function (m) {
+      if (labelled) return true;
+      var to = [m.getTo(), m.getCc(), m.getBcc ? m.getBcc() : '', m.getHeader('Delivered-To') || ''].join(',').toLowerCase();
+      return to.indexOf(addr.toLowerCase()) >= 0 && ok[senderEmail_(m.getFrom())];
+    });
+    if (labelled) msgs = msgs.slice(-1);                          // a labelled conversation: keep its latest email
+    msgs.forEach(function (m) { try { made.push(noteFromMail_(m, th)); } catch (e) { Logger.log('Mail note failed: ' + e); } });
+    th.addLabel(saved); if (labelled) th.removeLabel(inLabel); th.moveToArchive();
+  });
+  if (made.length) props_().setProperty('mailLast', JSON.stringify({ at: new Date().toISOString(), n: made.length }));
+  return { added: made.length, titles: made.map(function (n) { return n.title; }) };
+}
+
+function senderEmail_(from) { var m = String(from).match(/<([^>]+)>/); return (m ? m[1] : String(from)).trim().toLowerCase(); }
+
+/** "Boiler quote #HVAC #MSBC Thomas" → title "Boiler quote", tags [HVAC, MSBC Thomas] (only tags that already exist). */
+function subjectTags_(subject) {
+  var s = String(subject || '').replace(/^\s*((fwd?|fw|re)\s*:\s*)+/i, '').trim(), tags = [];
+  var names = readTable_('Tags').map(function (t) { return String(t.name); }).sort(function (a, b) { return b.length - a.length; });
+  names.forEach(function (n) {
+    var re = new RegExp('#' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=\\s|#|$)', 'i');
+    if (re.test(s)) { tags.push(n); s = s.replace(re, ' '); }
+  });
+  return { title: s.replace(/\s+/g, ' ').trim() || 'Email', tags: tags };
+}
+
+function noteFromMail_(m, th) {
+  var st = subjectTags_(m.getSubject()), esc = function (x) { return String(x || '').replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+  var body = String(m.getBody() || '').replace(/<img[^>]+src=["']cid:[^"']*["'][^>]*>/gi, '');   // inline pictures are added below as real images
+  var html = '<html><body><p>' + esc(headerLine_('Inbox', st.tags)) + '</p>' +
+    '<p style="color:#666;font-size:10pt">From: ' + esc(m.getFrom()) + '<br>Date: ' + esc(Utilities.formatDate(m.getDate(), Session.getScriptTimeZone(), 'MMM d, yyyy h:mm a')) +
+    (m.getTo() ? '<br>To: ' + esc(m.getTo()) : '') + '</p><hr>' + body + '</body></html>';
+  var bnd = 'arnote' + Date.now();
+  var payload = '--' + bnd + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' +
+    JSON.stringify({ name: st.title, mimeType: 'application/vnd.google-apps.document', parents: [props_().getProperty('notesId')] }) +
+    '\r\n--' + bnd + '\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n' + html + '\r\n--' + bnd + '--';
+  var res = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+    method: 'post', contentType: 'multipart/related; boundary=' + bnd, payload: Utilities.newBlob(payload).getBytes(),
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+  if (res.getResponseCode() !== 200) throw new Error('Could not make the note (' + res.getResponseCode() + ')');
+  var docId = JSON.parse(res.getContentText()).id;
+  var atts = m.getAttachments({ includeInlineImages: true, includeAttachments: true }).filter(function (a) { return a.getSize() > 0; });
+  var files = [];
+  if (atts.length) {
+    var doc = DocumentApp.openById(docId), b = doc.getBody(), attFolder = DriveApp.getFolderById(props_().getProperty('attId'));
+    atts.forEach(function (a) { var f = attFolder.createFile(a.copyBlob().setName(a.getName() || 'attachment')); files.push(f); appendFileToBody_(b, f); });
+    doc.saveAndClose();
+  }
+  if (st.tags.length) ensureTags_(st.tags);
+  var now = new Date(), id = Utilities.getUuid();
+  var n = { id: id, title: st.title, notebook: 'Inbox', tags: st.tags.join(TAG_SEP), created: now, updated: now, docId: docId, starred: false,
+    source: 'email', sourceUrl: 'https://mail.google.com/mail/?authuser=' + encodeURIComponent(Session.getEffectiveUser().getEmail()) + '#all/' + th.getId(), author: senderEmail_(m.getFrom()), attachments: files.length };
+  ss_().getSheetByName('Notes').appendRow(noteToRow_(n));
+  var attSh = ss_().getSheetByName('Attachments');
+  files.forEach(function (f) { attSh.appendRow([id, f.getId(), f.getName(), f.getMimeType(), f.getSize(), '']); });
+  return { id: id, title: st.title };
 }
 
 /* ---------------- Print ----------------
