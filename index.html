@@ -464,12 +464,16 @@ function rememberTags(list){var r=store('recentTags')||[];list.forEach(function(
 
 /* ---------- navigation ---------- */
 function go(v,arg){
-  if(S.view==='photos') P.back={key:phKey(),y:window.scrollY};   // coming back to Photos (or redrawing it) keeps your place
+  if(S.view==='photos') P.back={key:phKey(),y:window.scrollY};
+  if(v==='note'&&S.view&&S.view!=='note'&&S.view!=='new'){           // opening a note from a list: remember where you were, and let phone/browser Back return there
+    S.noteBack={v:S.view,arg:S.viewArg,y:window.scrollY,cab:S.cab?JSON.parse(JSON.stringify(S.cab)):null};
+    if(!(history.state&&history.state.note)) history.pushState({note:1},'');
+  } else if(v!=='note') S.noteBack=null;   // coming back to Photos (or redrawing it) keeps your place
   var pv=$('#phv'); if(pv&&pv._close) pv._close(true);
   if(v!=='note') S.triage=[];
   if(v!==S.view||v==='note'||v==='new') S.sel={};
   S.view=v; $('#main').classList.remove('wide','photosv'); document.body.classList.remove('phsel'); $$('#nav button').forEach(function(b){b.classList.toggle('on',b.dataset.v===v)});
-  window.scrollTo(0,0);
+  window.scrollTo(0,0); S.viewArg=arg;
   ({home:viewHome,inbox:viewInbox,tags:viewTags,all:viewAll,new:viewNew,note:viewNote,list:viewList,shortcuts:viewShortcuts,cabinet:viewCabinet,settings:viewSettings,photos:viewPhotos,receipts:viewReceipts}[v])(arg);
 }
 $$('#nav button').forEach(function(b){b.onclick=function(){go(b.dataset.v)}});
@@ -1310,11 +1314,16 @@ function runSearch(){
 }
 
 /* ---------- note view ---------- */
+function noteGoBack(){var b=S.noteBack;if(!b)return;S.noteBack=null;if(b.cab)S.cab=b.cab;
+  go(b.v,b.v==='list'&&S.lastList?S.lastList:b.arg);setTimeout(function(){window.scrollTo(0,b.y)},50);setTimeout(function(){window.scrollTo(0,b.y)},400)}
+window.addEventListener('popstate',function(){if(S.view==='note'&&S.noteBack&&!(history.state&&history.state.note)&&!$('#phv'))noteGoBack()});
+function backLabel(v){return {home:'Home',inbox:'Inbox',cabinet:'Cabinet',list:'list',all:'All notes',shortcuts:'Shortcuts',tags:'Tags',photos:'Photos',receipts:'Receipts',settings:'Settings'}[v]||'back'}
 function viewNote(id,keep){
   var n=S.byId[id]; if(!n){go('home');return}
   var isTriage=S.triage.length&&S.triage[0]===id;
   if(keep&&$('#tagbar')&&$('#title')&&$('#title').dataset.id===id){renderTags(n);return}
   $('#main').innerHTML=
+    (S.noteBack&&!isTriage?'<button class="btn small" id="nBack" style="margin-top:10px">‹ Back to '+esc(S.noteBack.v==='cabinet'&&S.noteBack.cab&&S.noteBack.cab.mode==='tag'&&S.noteBack.cab.tag?S.noteBack.cab.tag:S.noteBack.v==='list'&&S.lastList&&S.lastList.title?S.lastList.title:backLabel(S.noteBack.v))+'</button>':'')+
     (isTriage?'<div class="bar"><b>Inbox triage</b> <span class="muted">'+S.triage.length+' left</span></div>':'')+
     '<div class="note-head"><button class="starbtn'+(n.starred?' on':'')+'" id="star" title="Bookmark">'+(n.starred?'★':'☆')+'</button>'+
     '<input class="title" id="title" data-id="'+n.id+'" value="'+esc(n.title)+'"></div>'+
@@ -1340,6 +1349,7 @@ function viewNote(id,keep){
   if($('#ehere')) $('#ehere').onclick=function(){ $('#ehint').textContent='Editing in Google Docs. Changes save automatically. If this says you need access, use Edit in Google Docs instead (this browser is signed in to a different Google account).';
     $('#nbody').innerHTML='<iframe src="https://docs.google.com/document/d/'+n.docId+'/edit?rm=minimal'+(S.user?'&authuser='+encodeURIComponent(S.user):'')+'" allow="clipboard-read; clipboard-write"></iframe>'; this.remove(); S.editing=id; };
   $('#star').onclick=function(){batch({starred:!n.starred},n.starred?'Bookmark removed':'Bookmarked',[id]);viewNote(id)};
+  if($('#nBack')) $('#nBack').onclick=function(){if(history.state&&history.state.note)history.back();else noteGoBack()};
   $('#title').onchange=function(){var old=n.title;n.title=this.value;var p=call('api_updateNote',n.id,{title:n.title});
     undoToast('Renamed',function(){return p.then(function(){n.title=old;return call('api_updateNote',n.id,{title:old})}).then(function(){afterUndo([n.id])})})};
   if($('#file')) $('#file').onclick=function(){
