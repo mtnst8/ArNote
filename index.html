@@ -29,6 +29,25 @@ nav button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
 main{max-width:900px;margin:0 auto;padding:12px 14px 120px}
 h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--mute);margin:0}
 .lhead{display:flex;align-items:center;gap:8px;margin:18px 0 8px}.lhead h2{flex:1}
+.rcf{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 10px}
+.rcf select,.rcf input{padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:inherit;font-size:14px}
+.rcf #rcQ{width:140px}
+.rcsum{margin:0 0 10px;font-size:15px}
+.rcwrap{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:12px}
+.rct{border-collapse:collapse;width:100%;font-size:14px}
+.rct th{text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:.4px;opacity:.6;font-weight:600;padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+.rct td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+.rct tbody tr[data-n]{cursor:pointer}
+.rct tbody tr[data-n]:hover{background:rgba(127,127,127,.07)}
+.rct .n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.rct .rcg td{font-weight:700;background:rgba(127,127,127,.08)}
+.rct tfoot td{font-weight:700;border-bottom:0}
+.rcw{color:var(--warn);margin-right:4px}
+.rcd{display:flex;gap:14px;align-items:flex-start}
+.rcd img{width:180px;max-height:300px;object-fit:contain;border-radius:8px;background:#000}
+.rcdf{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.rcdf label{display:flex;flex-direction:column;font-size:12px;gap:2px;flex:1}
+@media (max-width:600px){.rcd{flex-direction:column}.rcd img{width:100%;max-height:220px}.rct{font-size:13px}.rct td,.rct th{padding:7px 6px}}
 .upbar{height:8px;border-radius:4px;background:var(--line);overflow:hidden}
 #upFill{height:100%;width:0;background:var(--acc);transition:width .2s}
 .ttwrap{display:grid;grid-template-columns:270px minmax(0,1fr);gap:18px;align-items:start;margin-top:10px}
@@ -292,6 +311,7 @@ body.guest #actbar,body.guest .row .nb{display:none!important}
   <button data-v="home" class="on"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg><span>Home</span></button>
   <button data-v="inbox"><svg viewBox="0 0 24 24"><path d="M3 13l3-8h12l3 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 13h5l1 3h6l1-3h5"/></svg><span>Inbox <span id="inboxN"></span></span></button>
   <button data-v="photos"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="15" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-8 8"/></svg><span>Photos</span></button>
+  <button data-v="receipts"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg><span>Receipts</span></button>
   <button data-v="cabinet"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/></svg><span>Cabinet</span></button>
   <button data-v="shortcuts"><svg viewBox="0 0 24 24"><path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/></svg><span>Shortcuts</span></button>
   <button data-v="all"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M9 12h7M9 16h7M9 8h3"/></svg><span>All notes</span></button>
@@ -450,7 +470,7 @@ function go(v,arg){
   if(v!==S.view||v==='note'||v==='new') S.sel={};
   S.view=v; $('#main').classList.remove('wide','photosv'); document.body.classList.remove('phsel'); $$('#nav button').forEach(function(b){b.classList.toggle('on',b.dataset.v===v)});
   window.scrollTo(0,0);
-  ({home:viewHome,inbox:viewInbox,tags:viewTags,all:viewAll,new:viewNew,note:viewNote,list:viewList,shortcuts:viewShortcuts,cabinet:viewCabinet,settings:viewSettings,photos:viewPhotos}[v])(arg);
+  ({home:viewHome,inbox:viewInbox,tags:viewTags,all:viewAll,new:viewNew,note:viewNote,list:viewList,shortcuts:viewShortcuts,cabinet:viewCabinet,settings:viewSettings,photos:viewPhotos,receipts:viewReceipts}[v])(arg);
 }
 $$('#nav button').forEach(function(b){b.onclick=function(){go(b.dataset.v)}});
 function rerender(){ var v=S.view; if(v==='inbox'&&isSplit()&&$('#pv')){refreshSplit();return} if(v==='list'&&S.lastList) viewList(S.lastList); else if(v==='list') runSearch(); else if(v!=='note') go(v) }
@@ -841,7 +861,7 @@ function renderPv(){
   el.innerHTML='<input id="pvTitle" class="pvtitle" value="'+esc(n.title)+'" title="Click to rename" spellcheck="false">'+
     '<div class="muted" style="font-size:12px">Created '+fmt(n.created)+(n.att?' · 📎'+n.att:'')+'</div>'+
     '<div class="bar" id="tagbar"></div>'+
-    '<div class="bar"><button class="btn primary" id="pvFile">File → Cabinet</button><button class="btn" id="pvOpen">Open / edit</button><button class="btn danger" id="pvDel">Delete</button>'+
+    '<div class="bar"><button class="btn primary" id="pvFile">File → Cabinet</button><button class="btn" id="pvOpen">Open / edit</button>'+(n.tags.indexOf('Receipt')>=0?'<button class="btn" id="pvRc">🧾 Receipt details</button>':'')+'<button class="btn danger" id="pvDel">Delete</button>'+
     '<span class="kbd">Keys: ↑ ↓ move · T add tag · F file · Enter open</span></div><div id="pvloc"></div>'+
     readerHtml();
   renderTags(n);
@@ -855,6 +875,7 @@ function renderPv(){
     var p=call('api_updateNote',n.id,{title:v}); undoToast('Renamed',function(){return p.then(function(){n.title=old;return call('api_updateNote',n.id,{title:old})}).then(function(){afterUndo([n.id])})})};
   $('#pvFile').onclick=function(){fileNote(n.id)};
   $('#pvOpen').onclick=function(){go('note',n.id)};
+  if($('#pvRc')) $('#pvRc').onclick=function(){S.rcData=null;rcDetails(n.id)};
   $('#pvDel').onclick=function(){var b=this;
     if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Tap again to delete';setTimeout(function(){if(b.isConnected){b.textContent='Delete';delete b.dataset.arm}},3000);return}
     trashLater([n.id],n.link?'Link removed (the file is untouched)':'Note deleted'); refreshInboxCount(); refreshSplit();};
@@ -1304,7 +1325,7 @@ function viewNote(id,keep){
       (isTriage?'<button class="btn" id="skip">Skip</button>':'')+
       (n.link?'<a class="btn" target="_blank" id="odocs" href="'+linkUrl(n)+'">Open in Drive ↗</a>':
         '<a class="btn" target="_blank" id="odocs" href="'+docUrl(n.docId,true)+'">Edit in Google Docs ↗</a><button class="btn" id="ehere">Edit here</button>'+
-        (n.sourceUrl?'<a class="btn" target="_blank" href="'+esc(n.sourceUrl)+'">'+(/mail\.google\.com/.test(n.sourceUrl)?'Open in Gmail':'Source')+'</a>':''))+
+        (n.sourceUrl?'<a class="btn" target="_blank" href="'+esc(n.sourceUrl)+'">'+(/mail\.google\.com/.test(n.sourceUrl)?'Open in Gmail':'Source')+'</a>':'')+(n.tags.indexOf('Receipt')>=0?'<button class="btn" onclick="S.rcData=null;rcDetails(\''+n.id+'\')">🧾 Receipt details</button>':''))+
       '<button class="btn" id="nprint">🖨 Print</button>'+
       '<button class="btn danger" id="del">'+(n.link?'Remove link':'Delete')+'</button></div>'+
     '<div id="nloc"></div><div class="atts" id="atts"></div>'+
@@ -1419,9 +1440,7 @@ function viewSettings(){
     el.innerHTML=(all.length?shareRows(all,true):'<p style="margin:4px 0">None yet. Open a tag and choose <b>Share…</b> to give someone a read-only link to its notes.</p>');
     bindShareRows('#sset',all,drawShares)}).catch(function(){})}
   drawShares();
-  call('api_receiptsInfo').then(function(r){var el=$('#rcpt');if(!el)return;
-    el.innerHTML='<div class="setrow"><span>'+r.thisYear+' receipt'+(r.thisYear===1?'':'s')+' this year · $'+r.totalThisYear.toFixed(2)+' total</span><a class="btn small" target="_blank" href="'+esc(r.url)+'">Open receipts spreadsheet ↗</a></div>'+
-      '<p style="margin:4px 0 0">New phone photos are read automatically. Receipts become notes tagged Receipt: tag them with a category (MSBC, Black Fork, Personal…) and the category fills in on the spreadsheet. For older photos: select them in Photos and press 🧾 Scan.</p>'}).catch(function(){var el=$('#rcpt');if(el)el.textContent='Not set up yet.'});
+  drawRcSet();
   call('api_accounts').then(function(ac){var el=$('#acct');if(!el)return;
     el.innerHTML=(ac.length?ac.map(function(a){return '<div class="acrow"><span class="mono">'+esc(a.email)+'</span>'+
       (a.tag?'<button class="chip" data-at="'+esc(a.tag)+'">'+esc(a.tag)+'</button><span>'+a.count+' linked</span><button class="btn small" data-ar="'+esc(a.tag)+'">Rename tag</button>':'<span>not tagged (tag was deleted)</span>')+'</div>'}).join(''):'')+
@@ -1434,6 +1453,125 @@ function viewSettings(){
   $('#unpair').onclick=function(){var b=this;if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Tap again to unpair';return}saveCfg(null);try{Object.keys(localStorage).forEach(function(k){if(/^arnote\.nv/.test(k))localStorage.removeItem(k)})}catch(e){}location.hash='';location.reload()};
 }
 
+/* ---------- Receipts: one clean report over the receipts that were read from photos ---------- */
+var RC=(function(){try{return JSON.parse(localStorage.getItem('arnote.rc')||'null')}catch(e){return null}})()||{per:'year',from:'',to:'',grp:'',f:{},q:''};
+function rcSave(){try{localStorage.setItem('arnote.rc',JSON.stringify(RC))}catch(e){}}
+function money(n){return n===null||n===undefined||isNaN(n)?'':(+n).toLocaleString(undefined,{style:'currency',currency:'USD'})}
+function rcRange(){var d=new Date(),y=d.getFullYear(),m=('0'+(d.getMonth()+1)).slice(-2),pm=new Date(y,d.getMonth()-1,1),pms=pm.getFullYear()+'-'+('0'+(pm.getMonth()+1)).slice(-2);
+  return {year:[y+'-01-01',y+'-12-31'],last:[(y-1)+'-01-01',(y-1)+'-12-31'],month:[y+'-'+m+'-01',y+'-'+m+'-31'],lastmonth:[pms+'-01',pms+'-31'],all:['',''],custom:[RC.from,RC.to]}[RC.per]||['','']}
+function viewReceipts(){
+  $('#main').classList.add('wide');
+  $('#main').innerHTML='<div class="lhead"><h2>Receipts</h2><span class="grow"></span><a class="btn small" id="rcSheet" target="_blank" style="display:none">Spreadsheet ↗</a></div><div id="rcBody"><p class="muted">Loading…</p></div>';
+  call('api_receipts').then(function(d){S.rcData=d;if(S.view==='receipts')rcDraw()}).catch(function(){$('#rcBody').innerHTML='<p class="muted">Could not load receipts.</p>'});
+}
+function rcDraw(){
+  var d=S.rcData, cols=d.cols, el=$('#rcBody'); if(!el) return;
+  $('#rcSheet').href=d.url; $('#rcSheet').style.display='';
+  var rg=rcRange(), q=(RC.q||'').toLowerCase();
+  var rows=d.rows.filter(function(r){
+    if(rg[0]&&(!r.date||r.date<rg[0]))return false; if(rg[1]&&(!r.date||r.date>rg[1]))return false;
+    for(var i=0;i<cols.length;i++){var f=RC.f[cols[i].name];if(!f)continue;if(f==='__none'?r.cols[i].length:r.cols[i].indexOf(f)<0)return false}
+    if(q&&(r.vendor+' '+r.title).toLowerCase().indexOf(q)<0)return false; return true});
+  rows.sort(function(a,b){return String(b.date).localeCompare(String(a.date))});
+  var sum=function(a,k){return a.reduce(function(s,r){return s+(+r[k]||0)},0)};
+  // the controls
+  var opts=function(list,cur){return list.map(function(o){return '<option value="'+esc(o[0])+'"'+(o[0]===cur?' selected':'')+'>'+esc(o[1])+'</option>'}).join('')};
+  var per=[['year','This year'],['last','Last year'],['month','This month'],['lastmonth','Last month'],['all','All dates'],['custom','Dates…']];
+  var grp=[['','No grouping']].concat(cols.map(function(c,i){return ['c'+i,'By '+c.name]}),[['vendor','By vendor'],['paid','By paid with'],['month','By month']]);
+  var h='<div class="rcf"><select id="rcPer">'+opts(per,RC.per)+'</select>'+
+    (RC.per==='custom'?'<input type="date" id="rcFrom" value="'+esc(RC.from)+'"><span class="muted">to</span><input type="date" id="rcTo" value="'+esc(RC.to)+'">':'')+
+    '<select id="rcGrp">'+opts(grp,RC.grp)+'</select>'+
+    cols.map(function(c,i){var vals={};d.rows.forEach(function(r){r.cols[i].forEach(function(t){vals[t]=1})});
+      return '<select data-rcf="'+esc(c.name)+'">'+opts([['',c.name+': all']].concat(Object.keys(vals).sort().map(function(t){return [t,t]}),[['__none',c.name+': none']]),RC.f[c.name]||'')+'</select>'}).join('')+
+    '<input id="rcQ" placeholder="Vendor…" value="'+esc(RC.q||'')+'" autocomplete="off"></div>';
+  h+='<div class="rcsum"><b>'+rows.length+'</b> receipt'+(rows.length===1?'':'s')+' · Total <b>'+money(sum(rows,'total'))+'</b> · Tax <b>'+money(sum(rows,'tax'))+'</b></div>';
+  if(!cols.length) h+='<p class="muted" style="font-size:13px;margin:0 0 8px">Tip: add report columns like Job and Category in <a href="#" id="rcSet">Settings → Receipts</a> — they come from your tags.</p>';
+  // the table
+  var ncol=3+cols.length;
+  var row=function(r){var warn=r.check?'<span class="rcw" title="Vendor, date or total missing">⚠</span>':'';
+    return '<tr data-n="'+esc(r.noteId)+'"><td>'+esc(r.date||'—')+'</td><td>'+warn+esc(r.vendor||'(no vendor)')+'</td>'+
+      cols.map(function(c,i){return '<td>'+esc(r.cols[i].join(', '))+(i===0&&r.cols[0].length>1?' <span class="rcw" title="Tagged with more than one">⚠ '+r.cols[0].length+'</span>':'')+'</td>'}).join('')+
+      '<td>'+esc(r.paid)+'</td><td class="n">'+money(r.tax)+'</td><td class="n">'+money(r.total)+'</td></tr>'};
+  var body='';
+  if(RC.grp){var key=function(r){if(RC.grp==='vendor')return r.vendor||'(no vendor)';if(RC.grp==='paid')return r.paid||'(not set)';if(RC.grp==='month')return r.date?r.date.slice(0,7):'(no date)';
+      var i=+RC.grp.slice(1);return r.cols[i]&&r.cols[i][0]||'(none)'};
+    var g={},order=[];rows.forEach(function(r){var k=key(r);if(!g[k]){g[k]=[];order.push(k)}g[k].push(r)});
+    if(RC.grp==='month')order.sort().reverse();else order.sort(function(a,b){return (a.charAt(0)==='('?1:0)-(b.charAt(0)==='('?1:0)||a.localeCompare(b)});
+    order.forEach(function(k){var lab=RC.grp==='month'&&/^\d{4}-\d\d$/.test(k)?monthLabel(k):k;
+      body+='<tr class="rcg"><td colspan="'+ncol+'">'+esc(lab)+' <span class="muted">'+g[k].length+'</span></td><td class="n">'+money(sum(g[k],'tax'))+'</td><td class="n">'+money(sum(g[k],'total'))+'</td></tr>'+g[k].map(row).join('')});
+  } else body=rows.map(row).join('');
+  h+=rows.length?'<div class="rcwrap"><table class="rct"><thead><tr><th>Date</th><th>Vendor</th>'+cols.map(function(c){return '<th>'+esc(c.name)+'</th>'}).join('')+'<th>Paid with</th><th class="n">Tax</th><th class="n">Total</th></tr></thead><tbody>'+body+
+    '</tbody><tfoot><tr><td colspan="'+ncol+'">Total</td><td class="n">'+money(sum(rows,'tax'))+'</td><td class="n">'+money(sum(rows,'total'))+'</td></tr></tfoot></table></div>'
+    :'<p class="muted">'+(d.rows.length?'No receipts match.':'No receipts yet. Photos of receipts are read automatically; for older ones select them in Photos and press 🧾 Scan.')+'</p>';
+  h+='<div class="bar" style="margin-top:10px"><button class="btn" id="rcCsv">Export (CSV)</button><button class="btn" id="rcPrint">Print</button></div>';
+  el.innerHTML=h;
+  var redo=function(){rcSave();rcDraw()};
+  $('#rcPer').onchange=function(){RC.per=this.value;redo()};
+  if($('#rcFrom')){$('#rcFrom').onchange=function(){RC.from=this.value;redo()};$('#rcTo').onchange=function(){RC.to=this.value;redo()}}
+  $('#rcGrp').onchange=function(){RC.grp=this.value;redo()};
+  $$('#rcBody [data-rcf]').forEach(function(s){s.onchange=function(){RC.f[s.dataset.rcf]=s.value;redo()}});
+  var qt;$('#rcQ').oninput=function(){var v=this.value;clearTimeout(qt);qt=setTimeout(function(){RC.q=v;rcSave();rcDraw();var x=$('#rcQ');if(x){x.focus();x.setSelectionRange(v.length,v.length)}},300)};
+  if($('#rcSet'))$('#rcSet').onclick=function(e){e.preventDefault();go('settings')};
+  $$('#rcBody tr[data-n]').forEach(function(tr){tr.onclick=function(){rcDetails(tr.dataset.n)}});
+  var title='Receipts '+(rg[0]||'')+(rg[1]?' to '+rg[1]:'');
+  $('#rcCsv').onclick=function(){
+    var qv=function(v){v=String(v===null||v===undefined?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+    var lines=[['Date','Vendor'].concat(cols.map(function(c){return c.name}),['Other tags','Paid with','Tax','Total','Note']).map(qv).join(',')].concat(rows.map(function(r){
+      return [r.date,r.vendor].concat(r.cols.map(function(x){return x.join('; ')}),[r.other.join('; '),r.paid,r.tax,r.total,r.title]).map(qv).join(',')}));
+    var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([lines.join('\r\n')],{type:'text/csv'}));a.download=title.replace(/[^\w -]/g,'').trim()+'.csv';document.body.appendChild(a);a.click();a.remove()};
+  $('#rcPrint').onclick=function(){var w=window.open('','_blank');if(!w){toast('Allow pop-ups to print');return}
+    w.document.write('<!doctype html><title>'+esc(title)+'</title><style>body{font:12px system-ui,sans-serif;margin:24px;color:#111}h1{font-size:16px;margin:0 0 4px}p{margin:0 0 12px;color:#555}table{border-collapse:collapse;width:100%}th,td{padding:4px 6px;border-bottom:1px solid #ddd;text-align:left}th{border-bottom:2px solid #333}.n{text-align:right;white-space:nowrap}.rcg td{font-weight:700;background:#f2f2f2}tfoot td{font-weight:700;border-top:2px solid #333}.rcw,.muted{color:#888;font-weight:400}</style>'+
+      '<h1>'+esc(title)+'</h1><p>'+$('.rcsum').innerHTML+'</p>'+$('.rct').outerHTML);w.document.close();w.focus();setTimeout(function(){w.print()},300)};
+}
+/** One receipt: the photo plus its details, fixable. */
+function rcDetails(noteId){
+  var get=S.rcData?Promise.resolve(S.rcData):call('api_receipts').then(function(d){S.rcData=d;return d});
+  get.then(function(d){var r=d.rows.filter(function(x){return x.noteId===noteId})[0];if(!r){toast('No receipt details for this note');return}
+    var cardOpts=d.seenCards.concat(Object.keys(d.cards)).filter(function(c,i,a){return a.indexOf(c)===i});
+    modal('Receipt',esc(r.title),
+      '<div class="rcd"><a href="https://drive.google.com/file/d/'+esc(r.fileId)+'/view'+(S.user?'?authuser='+encodeURIComponent(S.user):'')+'" target="_blank"><img src="'+phThumbUrl(r.fileId,800)+'" alt=""></a><div class="rcdf">'+
+      '<label>Date<input class="field" type="date" id="rdDate" value="'+esc(r.date)+'"></label>'+
+      '<label>Vendor<input class="field" id="rdVen" value="'+esc(r.vendor)+'"></label>'+
+      '<div style="display:flex;gap:8px"><label>Total<input class="field" id="rdTot" inputmode="decimal" value="'+(r.total===null?'':r.total.toFixed(2))+'"></label><label>Tax<input class="field" id="rdTax" inputmode="decimal" value="'+(r.tax===null?'':r.tax.toFixed(2))+'"></label></div>'+
+      '<label>Paid with<select class="field" id="rdPay">'+[['','—'],['card','Card'],['cash','Cash'],['check','Check']].map(function(o){return '<option value="'+o[0]+'"'+(r.pay===o[0]?' selected':'')+'>'+o[1]+'</option>'}).join('')+'</select></label>'+
+      '<label id="rdCardL">Card (last 4)<input class="field" id="rdCard" inputmode="numeric" maxlength="4" list="rdCards" value="'+esc(r.card)+'"><datalist id="rdCards">'+cardOpts.map(function(c){return '<option value="'+c+'">'+esc(d.cards[c]||'')+'</option>'}).join('')+'</datalist></label>'+
+      '<label id="rdChkL">Check #<input class="field" id="rdChk" value="'+esc(r.checkNo)+'"></label>'+
+      (d.cols.length||r.other.length?'<p class="muted" style="margin:6px 0 0;font-size:12px">'+d.cols.map(function(c,i){return '<b>'+esc(c.name)+':</b> '+(esc(r.cols[i].join(', '))||'—')}).join(' · ')+(r.other.length?' · <b>Other:</b> '+esc(r.other.join(', ')):'')+'<br>Change these by tagging the note.</p>':'')+
+      '</div></div>',
+      '<button class="btn" id="rdNote">Open note</button><span class="grow"></span><button class="btn" id="rdX">Cancel</button><button class="btn primary" id="rdSave">Save</button>');
+    var show=function(){var p=$('#rdPay').value;$('#rdCardL').style.display=p==='card'?'':'none';$('#rdChkL').style.display=p==='check'?'':'none'};show();$('#rdPay').onchange=show;
+    $('#rdX').onclick=closeModal;
+    $('#rdNote').onclick=function(){closeModal();go('note',noteId)};
+    $('#rdSave').onclick=function(){var b=this;b.disabled=true;
+      var f={date:$('#rdDate').value,vendor:$('#rdVen').value.trim(),total:$('#rdTot').value,tax:$('#rdTax').value,pay:$('#rdPay').value,card:$('#rdCard').value,checkNo:$('#rdChk').value};
+      call('api_receiptUpdate',noteId,f).then(function(){closeModal();toast('Receipt saved');return call('api_receipts')}).then(function(d2){S.rcData=d2;if(S.view==='receipts')rcDraw()}).catch(function(){b.disabled=false})};
+  }).catch(function(){});
+}
+/** Settings → Receipts: report columns (any parent tags) and card names. */
+function drawRcSet(){
+  call('api_receipts').then(function(d){var el=$('#rcpt');if(!el)return;S.rcData=d;
+    var y=String(new Date().getFullYear()),ty=d.rows.filter(function(r){return r.date.slice(0,4)===y});
+    var parents=S.tags.map(function(t){return t.name}).filter(function(t){return (S.children[t]||[]).length});
+    d.cols.forEach(function(c){if(parents.indexOf(c.parent)<0)parents.push(c.parent)});             // keep a chosen parent even if it has no sub-tags yet
+    parents.sort(function(a,b){return a.localeCompare(b)});
+    var cols=d.cols.slice(); while(cols.length<3) cols.push({name:'',parent:''});
+    var sel=function(i,cur){return '<select class="field" data-rcp="'+i+'" style="max-width:240px"><option value="">— parent tag —</option>'+parents.map(function(p){return '<option'+(p===cur?' selected':'')+'>'+esc(p)+'</option>'}).join('')+'</select>'};
+    var cards=d.seenCards.concat(Object.keys(d.cards)).filter(function(c,i,a){return a.indexOf(c)===i}).sort();
+    el.innerHTML='<div class="setrow"><span>'+ty.length+' receipt'+(ty.length===1?'':'s')+' this year · '+money(ty.reduce(function(s,r){return s+(+r.total||0)},0))+'</span><button class="btn small" id="rcGo">Open Receipts</button></div>'+
+      '<p style="margin:8px 0 4px"><b style="color:var(--ink)">Report columns</b> — each one shows the tags under a parent tag you pick (e.g. Job → your “Jobs” tag, Category → “Expense Categories”).</p>'+
+      cols.map(function(c,i){return '<div class="setrow"><input class="field" data-rcn="'+i+'" placeholder="Column name" value="'+esc(c.name)+'" style="max-width:160px">'+sel(i,c.parent)+'</div>'}).join('')+
+      '<p style="margin:10px 0 4px"><b style="color:var(--ink)">Card names</b> — shown as “Paid with”'+(cards.length?'':' (cards appear here once a receipt shows one)')+':</p>'+
+      cards.map(function(c){return '<div class="setrow"><span class="mono">…'+c+'</span><input class="field" data-rcc="'+c+'" placeholder="e.g. MSBC Visa" value="'+esc(d.cards[c]||'')+'" style="max-width:220px"></div>'}).join('')+
+      '<div class="setrow"><input class="field" id="rcNewC" placeholder="Card last 4" maxlength="4" inputmode="numeric" style="max-width:110px"><input class="field" id="rcNewN" placeholder="Name" style="max-width:180px"><button class="btn small" id="rcAddC">Add card</button></div>'+
+      '<div class="setrow"><span class="grow"></span><button class="btn small primary" id="rcSaveCfg">Save</button></div>';
+    $('#rcGo').onclick=function(){go('receipts')};
+    function collect(){var cs=[0,1,2].map(function(i){return {name:$('[data-rcn="'+i+'"]').value.trim(),parent:$('[data-rcp="'+i+'"]').value}}).filter(function(c){return c.name&&c.parent});
+      var cd={};$$('#rcpt [data-rcc]').forEach(function(x){if(x.value.trim())cd[x.dataset.rcc]=x.value.trim()});return {cols:cs,cards:cd}}
+    function save(cfg,b){if(b)b.disabled=true;call('api_receiptCfg',cfg).then(function(){toast('Receipt settings saved');drawRcSet()}).catch(function(){if(b)b.disabled=false})}
+    $('#rcAddC').onclick=function(){var v=$('#rcNewC').value.replace(/\D/g,''),n=$('#rcNewN').value.trim();if(v.length!==4||!n){toast('Enter the last 4 digits and a name');return}var c=collect();c.cards[v]=n;save(c,this)};
+    $('#rcSaveCfg').onclick=function(){save(collect(),this)};
+  }).catch(function(){var el=$('#rcpt');if(el)el.textContent='Not set up yet.'});
+}
 /* ---------- email → ArNote settings ---------- */
 function drawMailSet(){
   call('api_mailInfo').then(function(mi){var el=$('#mset');if(!el)return;

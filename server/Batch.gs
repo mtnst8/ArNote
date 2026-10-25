@@ -1437,10 +1437,11 @@ function api_photoMonths(o) {
  *  - Anything else stays a normal photo.
  * The note is a linked note pointing at the photo itself, so nothing is copied.
  */
-var RECEIPT_COLS = ['date', 'vendor', 'total', 'tax', 'card', 'category', 'check', 'noteId', 'fileId', 'photo', 'added'];
+var RECEIPT_COLS = ['date', 'vendor', 'total', 'tax', 'card', 'category', 'check', 'noteId', 'fileId', 'photo', 'added', 'pay', 'checkNo'];
 
 function receiptSheet_() {
   var sh = ensureSheet_('Receipts', RECEIPT_COLS);
+  if (sh.getLastColumn() < RECEIPT_COLS.length) sh.getRange(1, 1, 1, RECEIPT_COLS.length).setValues([RECEIPT_COLS]).setFontWeight('bold');   // newer columns: pay, checkNo
   if (!props_().getProperty('receiptFmt')) { sh.getRange('C:D').setNumberFormat('$#,##0.00'); props_().setProperty('receiptFmt', '1'); }
   return sh;
 }
@@ -1540,7 +1541,8 @@ function receiptFields_(lines, all) {
   }
   if (total === null) { var allAmt = moneyIn_(all); if (allAmt.length) total = Math.max.apply(null, allAmt); }
   var card = (all.match(/(?:x{2,}|\*+|#{2,}|ending in|acct:?)\s*(\d{4})\b/i) || all.match(/\b(\d{4})\s+(?:visa|mc|mastercard|amex|discover|debit)\b/i) || [])[1] || '';
-  return { vendor: vendor, date: date, total: total, tax: tax, card: card, check: (!vendor || !date || total === null) ? 'check' : '' };
+  var pay = card ? 'card' : /\bcash\b/i.test(all) ? 'cash' : '';
+  return { vendor: vendor, date: date, total: total, tax: tax, card: card, pay: pay, check: (!vendor || !date || total === null) ? 'check' : '' };
 }
 
 function cardFields_(lines, email, phone, web) {
@@ -1613,7 +1615,7 @@ function scanPhoto_(p) {
     out.title = 'Receipt — ' + (f.vendor || 'Unknown vendor') + (f.total !== null ? ' — ' + money_(f.total) : '') + (d ? ' — ' + d : '');
     out.noteId = photoNote_(p.id, out.title, ['Receipt']);
     receiptSheet_().appendRow([d, f.vendor, f.total === null ? '' : f.total, f.tax === null ? '' : f.tax, f.card, '', f.check, out.noteId, p.id,
-      'https://drive.google.com/file/d/' + p.id + '/view', new Date().toISOString()]);
+      'https://drive.google.com/file/d/' + p.id + '/view', new Date().toISOString(), f.pay || '', '']);
   } else if (r.kind === 'card') {
     var c = r.fields;
     out.title = [c.name, c.business].filter(String).join(' — ') || 'Business card';
@@ -1671,6 +1673,70 @@ function api_receiptsInfo() {
   var sh = receiptSheet_(), n = Math.max(0, sh.getLastRow() - 1), y = String(new Date().getFullYear()), thisYear = 0, total = 0;
   if (n) sh.getRange(2, 1, n, 3).getValues().forEach(function (r) { var d = r[0] instanceof Date ? r[0].toISOString() : String(r[0]); if (d.slice(0, 4) === y) { thisYear++; total += +r[2] || 0; } });
   return { url: ss_().getUrl() + '#gid=' + sh.getSheetId(), count: n, thisYear: thisYear, totalThisYear: Math.round(total * 100) / 100 };
+}
+
+/* ---------- Receipts tab: report columns from your tags, paid-with, fixable details ---------- */
+/** Settings: cols = up to 3 report columns [{name, parent}] (any parent tag); cards = {'4013': 'MSBC Visa'}. */
+function receiptCfg_() {
+  var c = {}; try { c = JSON.parse(props_().getProperty('receiptCfg') || '{}'); } catch (e) {}
+  return { cols: (c.cols || []).filter(function (x) { return x && x.name && x.parent; }).slice(0, 3), cards: c.cards || {} };
+}
+function api_receiptCfg(cfg) {
+  if (cfg) {
+    var cols = (cfg.cols || []).map(function (x) { return { name: String(x.name || '').trim().slice(0, 30), parent: String(x.parent || '') }; })
+      .filter(function (x) { return x.name && x.parent; }).slice(0, 3);
+    var cards = {}; Object.keys(cfg.cards || {}).forEach(function (k) { var n = String(cfg.cards[k] || '').trim(); if (/^\d{4}$/.test(k) && n) cards[k] = n.slice(0, 30); });
+    props_().setProperty('receiptCfg', JSON.stringify({ cols: cols, cards: cards }));
+  }
+  return receiptCfg_();
+}
+function last4_(v) { var s = String(v === null || v === undefined ? '' : v).replace(/\D/g, ''); return s ? ('0000' + s).slice(-4) : ''; }
+
+/** Every receipt with its tags sorted into the report columns. */
+function api_receipts() {
+  var cfg = receiptCfg_(), kids = {}, tz = Session.getScriptTimeZone(), sh = receiptSheet_();
+  readTable_('Tags').forEach(function (t) { var p = String(t.parent || ''); (kids[p] = kids[p] || []).push(String(t.name)); });
+  var sets = cfg.cols.map(function (c) { var s = {}; (function walk(x) { (kids[x] || []).forEach(function (k) { s[k] = 1; walk(k); }); })(c.parent); return s; });
+  var notes = {}; readTable_('Notes').forEach(function (n) { notes[n.id] = n; });
+  var n = sh.getLastRow() - 1, rows = [], seenCards = {};
+  if (n > 0) sh.getRange(2, 1, n, RECEIPT_COLS.length).getValues().forEach(function (r, i) {
+    var o = {}; RECEIPT_COLS.forEach(function (c, j) { o[c] = r[j]; });
+    var note = notes[o.noteId]; if (!note) return;                     // note deleted: receipt drops out of the report
+    var tags = splitTags_(note.tags), card = last4_(o.card); if (card) seenCards[card] = 1;
+    var date = o.date instanceof Date ? Utilities.formatDate(o.date, tz, 'yyyy-MM-dd') : String(o.date || '').slice(0, 10);
+    var pay = String(o.pay || '') || (card ? 'card' : '');
+    var paid = pay === 'cash' ? 'Cash' : pay === 'check' ? 'Check' + (o.checkNo ? ' #' + o.checkNo : '') : card ? (cfg.cards[card] || '…' + card) : '';
+    var total = o.total === '' || o.total === null ? null : +o.total, tax = o.tax === '' || o.tax === null ? null : +o.tax;
+    rows.push({ noteId: String(o.noteId), fileId: String(o.fileId), title: String(note.title), date: date, vendor: String(o.vendor || ''), total: total, tax: tax,
+      card: card, pay: pay, checkNo: String(o.checkNo || ''), paid: paid,
+      cols: sets.map(function (s) { return tags.filter(function (t) { return s[t]; }); }),
+      other: tags.filter(function (t) { return t !== 'Receipt' && !sets.some(function (s) { return s[t]; }); }),
+      check: !o.vendor || !date || total === null });
+  });
+  return { cols: cfg.cols, cards: cfg.cards, seenCards: Object.keys(seenCards).sort(), rows: rows, url: ss_().getUrl() + '#gid=' + sh.getSheetId() };
+}
+
+/** Fix a receipt's details. f: {date, vendor, total, tax, pay: 'card'|'cash'|'check'|'', card, checkNo} */
+function api_receiptUpdate(noteId, f) {
+  var lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    var sh = receiptSheet_(), n = sh.getLastRow() - 1; if (n < 1) throw new Error('Receipt not found');
+    var k = RECEIPT_COLS.indexOf('noteId'), v = sh.getRange(2, 1, n, RECEIPT_COLS.length).getValues();
+    for (var i = 0; i < v.length; i++) if (String(v[i][k]) === String(noteId)) {
+      var r = v[i], C = function (c) { return RECEIPT_COLS.indexOf(c); }, num = function (x) { x = String(x === null || x === undefined ? '' : x).replace(/[$,\s]/g, ''); return x === '' || isNaN(+x) ? '' : Math.round(+x * 100) / 100; };
+      if (f.date !== undefined) r[C('date')] = String(f.date || '').slice(0, 10);
+      if (f.vendor !== undefined) r[C('vendor')] = String(f.vendor || '').slice(0, 60);
+      if (f.total !== undefined) r[C('total')] = num(f.total);
+      if (f.tax !== undefined) r[C('tax')] = num(f.tax);
+      if (f.pay !== undefined) r[C('pay')] = /^(card|cash|check)$/.test(f.pay) ? f.pay : '';
+      if (f.card !== undefined) r[C('card')] = last4_(f.card);
+      if (f.checkNo !== undefined) r[C('checkNo')] = String(f.checkNo || '').replace(/[^\w-]/g, '').slice(0, 12);
+      r[C('check')] = (!r[C('vendor')] || !r[C('date')] || r[C('total')] === '') ? 'check' : '';
+      sh.getRange(i + 2, 1, 1, RECEIPT_COLS.length).setValues([r]);
+      return true;
+    }
+    throw new Error('Receipt not found');
+  } finally { lock.releaseLock(); }
 }
 
 /** Test only: read a photo and say what it would be, without changing anything. */
