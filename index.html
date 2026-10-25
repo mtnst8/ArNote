@@ -198,7 +198,12 @@ main.wide{max-width:1500px}
 #tagIn{font:inherit;font-size:13px;padding:3px 8px;border:1px solid var(--line);border-radius:999px;width:150px;background:transparent;color:inherit}
 #tagIn:focus{outline:2px solid var(--acc);width:200px}
 .tagsug{display:none;position:absolute;left:0;top:calc(100% + 4px);z-index:40;min-width:240px;max-height:300px;overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.15)}
-.tagsug.on{display:block}.tagsug .sg{padding:6px 10px;cursor:pointer;font-size:13px}.tagsug .sg.on{background:var(--acc2)}
+.tagsug.on{display:block}
+.tagsug .sgt{display:flex;align-items:center;font-size:13px}
+.tagsug .sgt .tw{width:20px;flex:none;text-align:center;cursor:pointer;opacity:.7}
+.tagsug .sgt .nm{flex:1;padding:5px 6px;cursor:pointer;border-radius:5px}
+.tagsug .sgt .nm:hover{background:var(--acc2)}
+.tagsug .sgt.has .nm{opacity:.5;cursor:default}.tagsug .sg{padding:6px 10px;cursor:pointer;font-size:13px}.tagsug .sg.on{background:var(--acc2)}
 .chip.ghost{background:transparent;border:1px dashed var(--acc)}
 .upbar{margin:6px 0 2px;font-size:12px}.upbar a{color:inherit}
 #dropov{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;background:rgba(30,60,120,.18);border:3px dashed #3b6fd8;font:600 20px system-ui;color:#1d3f8f}
@@ -1377,7 +1382,14 @@ function renderTags(n){
   var inp=$('#tagIn'), sug=$('#tagSug'), items=[], k=0;
   function draw(){
     var q=inp.value.trim().toLowerCase(); items=[]; k=0;
-    if(!q){sug.innerHTML='';sug.classList.remove('on');return}
+    if(!q){                                                         // nothing typed: show the whole tag tree to pick from
+      var h='';(function walk(p,d){(S.children[p]||[]).forEach(function(t){var kids=(S.children[t]||[]).length,op=S.tagOpen[t],has=n.tags.indexOf(t)>=0;
+        h+='<div class="sgt'+(has?' has':'')+'" style="padding-left:'+(4+d*16)+'px"><span class="tw" data-tw="'+esc(t)+'">'+(kids?(op?'▾':'▸'):'')+'</span><span class="nm" data-t="'+esc(t)+'">'+esc(t)+(has?' ✓':'')+'</span></div>';
+        if(kids&&op)walk(t,d+1)})})('',0);
+      sug.innerHTML='<div class="muted" style="font-size:11px;padding:4px 8px">Pick a tag, or type to search</div>'+h; sug.classList.add('on');
+      sug.querySelectorAll('[data-tw]').forEach(function(b){b.onmousedown=function(e){e.preventDefault();var t=b.dataset.tw;if(S.tagOpen[t])delete S.tagOpen[t];else S.tagOpen[t]=1;draw()}});
+      sug.querySelectorAll('[data-t]').forEach(function(b){b.onmousedown=function(e){e.preventDefault();var t=b.dataset.t;if(n.tags.indexOf(t)<0)addTagTo(n,t,true)}});
+      return}
     var names=S.tags.map(function(t){return t.name}).filter(function(t){return n.tags.indexOf(t)<0&&t.toLowerCase().indexOf(q)>=0});
     names.sort(function(a,b){var pa=a.toLowerCase().indexOf(q)===0?0:1,pb=b.toLowerCase().indexOf(q)===0?0:1;return pa-pb||a.length-b.length||a.localeCompare(b)});
     items=names.slice(0,8).map(function(t){return {t:t,label:esc(t)+(S.parent[t]?' <span class="muted">'+esc(tagPath(S.parent[t]))+'</span>':'')}});
@@ -1399,7 +1411,9 @@ function renderTags(n){
     else if(e.key==='Backspace'&&!inp.value&&n.tags.length){var t=n.tags[n.tags.length-1];batch({removeTags:[t]},'Removed “'+t+'”',[n.id]);renderTags(n);$('#tagIn').focus()}
   };
   inp.onblur=function(){setTimeout(function(){if(sug.isConnected){sug.classList.remove('on')}},150)};
+  inp.onfocus=draw; inp.onclick=function(){if(!sug.classList.contains('on'))draw()};
 }
+S.tagOpen={};
 function addTagTo(n,t,refocus){
   t=String(t).trim(); if(!t||n.tags.indexOf(t)>=0) return;
   if(!S.parent.hasOwnProperty(t)) setTags(S.tags.concat([{name:t,parent:''}]));
