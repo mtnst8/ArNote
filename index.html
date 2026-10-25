@@ -164,6 +164,7 @@ body.phsel .toast{bottom:calc(var(--phBarH,60px) + 14px)}
 @media (max-width:600px){.wide.photosv{padding-right:44px}.scrub{width:40px}.scrub .bub{right:38px}}
 .phv{position:fixed;inset:0;z-index:60;background:#0b0b0d;display:flex;flex-direction:column;color:#eee}
 .phv .top{display:flex;gap:8px;align-items:center;padding:10px 14px;flex-wrap:wrap}.phv .top .grow{flex:1}
+.pvloc{display:flex;gap:4px;flex-wrap:wrap;align-items:center}.pvloc .chip{color:#fff;border-color:rgba(255,255,255,.35);background:transparent;text-decoration:none;font-size:12px}
 .phv .img{flex:1;display:flex;align-items:center;justify-content:center;min-height:0;position:relative}
 .phv .img img{max-width:100%;max-height:100%;object-fit:contain}
 .phv .img iframe{width:calc(100% - 120px);height:100%;border:0;background:#000}
@@ -1448,6 +1449,7 @@ function viewSettings(){
     '<div class="setrow"><button class="btn primary" id="cpPair">Copy pairing link</button>'+(navigator.share?'<button class="btn" id="shPair">Share…</button>':'')+'</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Email to ArNote</h3><div id="mset" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Receipts</h3><div id="rcpt" class="muted" style="font-size:13px">Loading…</div>'+
+    '<h3 style="margin:16px 0 4px;font-size:15px">Photo places</h3><div id="plset" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Shared links</h3><div id="sset" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Google accounts</h3><div id="acct" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Linked Drive folders</h3><div id="lfold" class="muted" style="font-size:13px">Loading…</div>'+
@@ -1456,7 +1458,7 @@ function viewSettings(){
     '<p class="muted" style="font-size:12px;margin-top:14px">ArNote · your notes stay in your own Google Drive.</p></div>';
   $('#cpPair').onclick=function(){var l=pairLink();(navigator.clipboard?navigator.clipboard.writeText(l):Promise.reject()).then(function(){toast('Pairing link copied')}).catch(function(){prompt('Copy this link:',l)})};
   if($('#shPair')) $('#shPair').onclick=function(){navigator.share({title:'ArNote pairing link',text:pairLink()}).catch(function(){})};
-  drawMailSet();
+  drawMailSet(); drawPlaceSet();
   call('api_linkedFolders').then(function(fs){var el=$('#lfold');if(!el)return;
     el.innerHTML=fs.length?fs.map(function(f){return '<div class="setrow"><span>📁 '+esc(f.name)+'</span><button class="btn small" data-uw="'+esc(f.id)+'">Stop syncing</button></div>'}).join('')+
       '<p style="margin:4px 0 0">New files in these folders are added to the Cabinet every 15 minutes. Stopping keeps the notes already made.</p>':'None yet. Link a folder from Inbox → 🔗 Link Drive files.';
@@ -1606,6 +1608,21 @@ function drawRcSet(){
     $('#rcSaveCfg').onclick=function(){save(collect(),this)};
   }).catch(function(){var el=$('#rcpt');if(el)el.textContent='Not set up yet.'});
 }
+/* ---------- photo places settings ---------- */
+function drawPlaceSet(){
+  phPlaces(true).then(function(pp){var el=$('#plset');if(!el)return;var list=(pp.places||[]).slice();
+    el.innerHTML='<p style="margin:0 0 6px">Photos are grouped by town automatically. Places you name (home, camp, a job site) are listed first in Photos → By place. Save one from any photo with a location.</p>'+
+      (list.length?list.map(function(p,i){return '<div class="setrow"><b style="color:var(--ink);min-width:120px">⭐ '+esc(p.name)+'</b><span>'+((pp.named||{})[p.name]||0)+' photos</span>'+
+        '<select class="field" data-pr="'+i+'" style="width:auto;margin:0">'+PLACE_SIZES.map(function(s){return '<option value="'+s[0]+'"'+(s[0]===+p.r?' selected':'')+'>'+s[1]+' ('+(s[0]<1000?s[0]+' m':s[0]/1000+' km')+')</option>'}).join('')+
+        (PLACE_SIZES.some(function(s){return s[0]===+p.r})?'':'<option selected value="'+p.r+'">'+placeSizeName(p.r)+'</option>')+'</select>'+
+        '<button class="btn small" data-pn="'+i+'">Rename</button><button class="btn small" data-pd="'+i+'">Remove</button></div>'}).join(''):'<p style="margin:4px 0">None yet.</p>')+
+      '<p style="margin:6px 0 0;font-size:12px">'+pp.withLoc+' photos have a location'+(pp.pending?' · '+pp.pending+' still being read':'')+'. Removing a place doesn\'t touch any photos.</p>';
+    function save(){call('api_places',list).then(function(){return drawPlaceSet()}).catch(function(e){toast(e.message)})}
+    $$('#plset [data-pr]').forEach(function(s){s.onchange=function(){list[+s.dataset.pr].r=+s.value;save()}});
+    $$('#plset [data-pd]').forEach(function(b){b.onclick=function(){list.splice(+b.dataset.pd,1);save()}});
+    $$('#plset [data-pn]').forEach(function(b){b.onclick=function(){var p=list[+b.dataset.pn],n=prompt('New name for “'+p.name+'”',p.name);if(n&&n.trim()){p.name=n.trim();save()}}});
+  }).catch(function(){var el=$('#plset');if(el)el.textContent='Not available yet.'});
+}
 /* ---------- email → ArNote settings ---------- */
 function drawMailSet(){
   call('api_mailInfo').then(function(mi){var el=$('#mset');if(!el)return;
@@ -1736,15 +1753,47 @@ function phStats(force){
   return call('api_photoStats').then(function(st){st._t=Date.now();P.stats=st;return st});
 }
 function phTagCount(t){var st=P.stats||{tags:{}},n=0;descendants(t).forEach(function(x){n+=st.tags[x]||0});return n}
-function phQ(){return {view:P.tab==='untagged'?'untagged':'all',exact:P.tab==='tag'&&!!P.tag&&S.tt.exact,tag:P.tab==='tag'?P.tag:'',folder:P.tab==='folder'?P.folder:''}}
-function phKey(){return P.tab+'|'+P.tag+'|'+P.folder}
+function phQ(){var pl=P.tab==='place'?(P.pl||{}):{};
+  return {view:P.tab==='untagged'?'untagged':'all',exact:P.tab==='tag'&&!!P.tag&&S.tt.exact,tag:P.tab==='tag'?P.tag:'',folder:P.tab==='folder'?P.folder:'',
+    region:pl.region||'',town:pl.town||'',named:pl.named||'',nolocation:!!pl.none,q:P.q||''}}
+function phKey(){return P.tab+'|'+P.tag+'|'+P.folder+'|'+JSON.stringify(P.pl||{})+'|'+(P.q||'')}
+function phPlaceSel(){var pl=P.pl||{};return !!(pl.region||pl.named||pl.none)}
+function phPlaces(force){
+  if(P.places&&!force&&Date.now()-P.places._t<60000) return Promise.resolve(P.places);
+  return call('api_photoPlaces').then(function(r){r._t=Date.now();P.places=r;return r});
+}
+/** Which named place a spot is in (closest circle that contains it). */
+function phNamedAt(lat,lng){var best='',bd=1e12,R=6371000,rd=Math.PI/180;
+  ((P.places||{}).places||[]).forEach(function(p){var x=(p.lng-lng)*rd*Math.cos((p.lat+lat)/2*rd),y=(p.lat-lat)*rd,m=Math.sqrt(x*x+y*y)*R;if(m<=p.r&&m<bd){bd=m;best=p.name}});return best}
+var PLACE_SIZES=[[300,'Small','about 300 m across the street — a house and yard, one building'],[1000,'Medium','about 1 km — a farm, a neighbourhood, a job site'],[5000,'Large','about 5 km — a whole town, a lake, a park']];
+function placeSizeName(r){var s=PLACE_SIZES.filter(function(x){return x[0]===+r})[0];return s?s[1]:(r>=1000?(r/1000)+' km':r+' m')}
+/** Save a spot as a named place: name + size. */
+function phSavePlace(lat,lng,town){
+  modal('Save as a place','Photos taken inside the circle show up under this name in Photos → By place. Only the places you save are listed — towns are grouped for you automatically.',
+    '<label class="muted" style="font-size:13px">Name</label><input class="field" id="spN" placeholder="e.g. Home, Camp, Smith job" autocomplete="off" value="">'+
+    '<p class="muted" style="font-size:13px;margin:12px 0 4px">How big is it?</p>'+PLACE_SIZES.map(function(s){return '<label class="setrow" style="cursor:pointer;margin:2px 0"><input type="radio" name="spR" value="'+s[0]+'"'+(s[0]===1000?' checked':'')+'><span><b>'+s[1]+'</b> <span class="muted">'+esc(s[2])+'</span></span></label>'}).join('')+
+    (town?'<p class="muted" style="font-size:12px;margin:8px 0 0">Near '+esc(town)+'. You can change the size later in Settings → Places.</p>':''),
+    '<span class="grow"></span><button class="btn" id="spC">Cancel</button><button class="btn primary" id="spS">Save</button>');
+  setTimeout(function(){var x=$('#spN');if(x)x.focus()},30);
+  $('#spC').onclick=closeModal;
+  $('#spN').onkeydown=function(e){if(e.key==='Enter')$('#spS').click()};
+  $('#spS').onclick=function(){var n=$('#spN').value.trim();if(!n){toast('Give it a name');return}
+    var r=+(document.querySelector('input[name=spR]:checked')||{}).value||1000,b=this;b.disabled=true;
+    phPlaces().then(function(pp){var list=(pp.places||[]).filter(function(p){return p.name.toLowerCase()!==n.toLowerCase()}).concat([{name:n,lat:lat,lng:lng,r:r}]);
+      return call('api_places',list)}).then(function(){closeModal();toast('Saved “'+n+'”');return phPlaces(true)}).then(function(){if(S.view==='photos'&&P.tab==='place')phTop()}).catch(function(e){b.disabled=false;toast(e.message)})};
+}
 function monthLabel(k){if(!k)return 'No date';var d=new Date(+k.slice(0,4),+k.slice(5,7)-1,1);return d.toLocaleDateString(undefined,{month:'long',year:'numeric'})}
 function viewPhotos(){
   if(P.tab==='inbox'||P.tab==='filed') P.tab='all';
   P.sel={}; P.gen++; $('#main').classList.add('wide','photosv');
   var hd=$('#side header'), hr=hd?hd.getBoundingClientRect():null;   // phone layout: the app header stays on top, so month labels stick below it
   document.documentElement.style.setProperty('--phTop',(hr&&hr.width>window.innerWidth*0.7&&/sticky|fixed/.test(getComputedStyle(hd).position)?Math.round(hr.height):0)+'px');
-  $('#main').innerHTML='<div class="lhead"><h2>Photos</h2><span class="muted" id="phSync" style="font-size:12px"></span><button class="btn small primary" id="phAdd" title="Pick photos or videos from this device">＋ Add photos</button><button class="btn small" id="phNow">Check for new</button><input type="file" id="phFile" accept="image/*,video/*" multiple hidden></div><div id="phTop"><p class="muted">Loading…</p></div><div id="phBar"></div>'+(P.tab==='tag'?'<div class="ttwrap '+(P.tag?'res':'tree')+'"><div class="ttree" id="phTree"></div><div class="ttres"><div id="phTH"></div><div id="phTL"></div></div></div>':'<div id="phTL"></div>')+'<div class="scrub" id="phScrub" style="display:none"></div>';
+  $('#main').innerHTML='<div class="lhead"><h2>Photos</h2><span class="muted" id="phSync" style="font-size:12px"></span><button class="btn small primary" id="phAdd" title="Pick photos or videos from this device">＋ Add photos</button><button class="btn small" id="phNow">Check for new</button><input type="file" id="phFile" accept="image/*,video/*" multiple hidden></div>'+
+    '<div class="setrow" style="margin:6px 0 0"><input class="field" id="phSrch" type="search" placeholder="🔍 Search photos — a town, place, tag or file name" autocomplete="off" style="margin:0;max-width:420px" value="'+esc(P.q||'')+'">'+(P.q?'<button class="btn small" id="phSrchX">Clear</button>':'')+'</div>'+
+    '<div id="phTop"><p class="muted">Loading…</p></div><div id="phBar"></div>'+(P.tab==='tag'?'<div class="ttwrap '+(P.tag?'res':'tree')+'"><div class="ttree" id="phTree"></div><div class="ttres"><div id="phTH"></div><div id="phTL"></div></div></div>':'<div id="phTL"></div>')+'<div class="scrub" id="phScrub" style="display:none"></div>';
+  $('#phSrch').onkeydown=function(e){if(e.key==='Enter'){P.q=this.value.trim();viewPhotos()}};
+  $('#phSrch').onsearch=function(){if(!this.value&&P.q){P.q='';viewPhotos()}};
+  if($('#phSrchX')) $('#phSrchX').onclick=function(){P.q='';viewPhotos()};
   $('#phAdd').onclick=function(){$('#phFile').click()};
   $('#phFile').onchange=function(){var f=[].slice.call(this.files||[]);this.value='';if(f.length)phAddFiles(f)};
   $('#phNow').onclick=function(){var b=this;b.disabled=true;b.textContent='Checking…';
@@ -1755,11 +1804,11 @@ function viewPhotos(){
       $('#phTop').innerHTML='<div class="wg" style="margin-top:10px"><p style="margin-top:0"><b>No photos yet.</b> ArNote shows the photos in your Drive folder <a href="'+esc(st.rootUrl)+'" target="_blank" style="color:var(--acc)">ArNote Photos</a> (and every folder inside it). They stay there; ArNote just keeps your tags.</p>'+
         '<ul class="muted" style="font-size:14px;margin:0;padding-left:18px"><li><b>Your existing photos:</b> export them with Google Takeout and copy the folders into ArNote Photos.</li><li><b>New phone photos:</b> a sync app (Autosync for Google Drive or FolderSync on Android) copying your camera folder to ArNote Photos/Phone.</li><li>New photos are picked up every 15 minutes, or press <b>Check for new</b>.</li></ul></div>';
       return }
-    phTop(); var show=!(P.tab==='tag'&&!P.tag); if(show) phTimeline(); else {$('#phTL').innerHTML='';$('#phScrub').style.display='none'} phPaint();
+    phTop(); var show=!(P.tab==='tag'&&!P.tag)&&!(P.tab==='place'&&!phPlaceSel()&&!P.q); if(show) phTimeline(); else {$('#phTL').innerHTML='';$('#phScrub').style.display='none'} phPaint();
   }).catch(function(){$('#phTop').innerHTML='<p class="muted">Could not load photos.</p>'});
 }
 function phTop(){
-  var st=P.stats, tabs=[['all','All',st.total],['untagged','Untagged',st.untagged],['tag','By tag'],['folder','By folder']];
+  var st=P.stats, tabs=[['all','All',st.total],['untagged','Untagged',st.untagged],['tag','By tag'],['place','By place'],['folder','By folder']];
   var h='<div class="tabs" id="phTabs" style="margin:10px 0 4px">'+tabs.map(function(t){return '<button data-t="'+t[0]+'"'+(P.tab===t[0]?' class="on"':'')+'>'+t[1]+(t[2]!=null?' <span class="muted">'+t[2]+'</span>':'')+'</button>'}).join('')+'</div>';
   if(P.tab==='tag'){
     if(P.tag&&!S.parent.hasOwnProperty(P.tag)) P.tag='';
@@ -1776,6 +1825,33 @@ function phTop(){
       if($('#ttEx')) $('#ttEx').onchange=function(){S.tt.exact=this.checked;ttSave();viewPhotos()};
       bindNewTag(function(){viewPhotos()});
     },0);
+  } else if(P.tab==='place'){
+    h+='<div id="phPl"><p class="muted">Loading places…</p></div>';
+    phPlaces().then(function(pp){var el=$('#phPl');if(!el)return;var pl=P.pl=P.pl||{};
+      var cnt=function(n){return ' <span class="muted">'+n+'</span>'}, chip=function(attr,label,n){return '<button class="chip" '+attr+'>'+label+(n!=null?cnt(n):'')+'</button>'};
+      var crumbs='<div class="crumbs"><button class="cr" data-pl="{}">Places</button>';
+      if(pl.named) crumbs+='<span class="sep">›</span><b>⭐ '+esc(pl.named)+'</b>';
+      else if(pl.none) crumbs+='<span class="sep">›</span><b>No location</b>';
+      else if(pl.region){crumbs+='<span class="sep">›</span>'+(pl.town?'<button class="cr" data-pl="'+esc(JSON.stringify({region:pl.region}))+'">'+esc(pl.region)+'</button><span class="sep">›</span><b>📍 '+esc(pl.town)+'</b>':'<b>'+esc(pl.region)+'</b>')}
+      crumbs+='</div>';
+      var body='';
+      if(!phPlaceSel()){
+        var reg=pp.regions||{}, rn=Object.keys(reg).map(function(r){var t=0;Object.keys(reg[r]).forEach(function(k){t+=reg[r][k]});return [r,t]}).sort(function(a,b){return b[1]-a[1]});
+        var nm=(pp.places||[]).map(function(p){return [p.name,(pp.named||{})[p.name]||0]});
+        body+='<p style="margin:8px 0 2px"><b>My places</b> <button class="btn small" id="plMng" style="margin-left:6px">Manage…</button></p>'+
+          (nm.length?'<div class="subtags">'+nm.map(function(x){return chip('data-pl="'+esc(JSON.stringify({named:x[0]}))+'"','⭐ '+esc(x[0]),x[1])}).join('')+'</div>':
+            '<p class="muted" style="font-size:13px;margin:2px 0">None yet. Open a photo taken somewhere you go a lot (home, camp, a job site) and tap <b>Save as a place</b>.</p>')+
+          '<p style="margin:12px 0 2px"><b>States &amp; countries</b></p>'+
+          (rn.length?'<div class="subtags">'+rn.map(function(x){return chip('data-pl="'+esc(JSON.stringify({region:x[0]}))+'"',esc(x[0]),x[1])}).join('')+'</div>':'<p class="muted" style="font-size:13px;margin:2px 0">No towns named yet.</p>')+
+          '<p class="muted" style="font-size:12px;margin:10px 0 0">'+pp.withLoc+' photos have a location'+(pp.none?' · '+chip('data-pl="{&quot;none&quot;:1}"','no location',pp.none):'')+(pp.pending?' · '+pp.pending+' still being read (a few hundred every 15 minutes)':'')+'</p>';
+      } else if(pl.region&&!pl.town){
+        var tw=(pp.regions||{})[pl.region]||{};
+        body+='<div class="subtags">'+Object.keys(tw).sort(function(a,b){return tw[b]-tw[a]||a.localeCompare(b)}).map(function(t){return chip('data-pl="'+esc(JSON.stringify({region:pl.region,town:t}))+'"','📍 '+esc(t),tw[t])}).join('')+'</div>';
+      }
+      el.innerHTML=crumbs+body;
+      $$('#phPl [data-pl]').forEach(function(b){b.onclick=function(){P.pl=JSON.parse(b.dataset.pl);viewPhotos();window.scrollTo(0,0)}});
+      if($('#plMng')) $('#plMng').onclick=function(){go('settings');setTimeout(function(){var x=$('#plset');if(x)x.scrollIntoView({block:'start'})},300)};
+    }).catch(function(){var el=$('#phPl');if(el)el.innerHTML='<p class="muted">Places aren\'t ready yet.</p>'});
   } else if(P.tab==='folder'){
     var fc=st.folders||{}, pre=P.folder?P.folder+'/':'', sub={};
     Object.keys(fc).forEach(function(f){ if(P.folder&&f!==P.folder&&f.indexOf(pre)!==0) return; var rest=P.folder?f.slice(pre.length):f; if(!rest) return; var k=rest.split('/')[0]; sub[k]=(sub[k]||0)+fc[f]});
@@ -2042,7 +2118,7 @@ function phViewer(id,swapping){
   var p=P.byId[id]; if(!p) return; var flat=phFlat(), i=flat.findIndex(function(x){return x.id===id});
   var v=document.createElement('div'); v.className='phv'; v.id='phv';
   var d=p.taken?new Date(p.taken):null, isVid=/^video/.test(p.mime);
-  v.innerHTML='<div class="top"><b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50vw">'+esc(p.name)+'</b><span style="opacity:.7;font-size:13px">'+(d&&!isNaN(d)?d.toLocaleDateString(undefined,{weekday:'short',year:'numeric',month:'short',day:'numeric'}):'')+(p.folder?' · '+esc(p.folder):'')+'</span><span class="grow"></span><span id="pvInfo" style="opacity:.6;font-size:12px"></span><a class="btn small" id="pvOpen" target="_blank" href="https://drive.google.com/file/d/'+encodeURIComponent(id)+'/view'+(S.user?'?authuser='+encodeURIComponent(S.user):'')+'">Open in Drive ↗</a><button class="btn small" id="pvX">✕</button></div>'+
+  v.innerHTML='<div class="top"><b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50vw">'+esc(p.name)+'</b><span style="opacity:.7;font-size:13px">'+(d&&!isNaN(d)?d.toLocaleDateString(undefined,{weekday:'short',year:'numeric',month:'short',day:'numeric'}):'')+(p.folder?' · '+esc(p.folder):'')+'</span><span id="pvLoc" class="pvloc"></span><span class="grow"></span><span id="pvInfo" style="opacity:.6;font-size:12px"></span><a class="btn small" id="pvOpen" target="_blank" href="https://drive.google.com/file/d/'+encodeURIComponent(id)+'/view'+(S.user?'?authuser='+encodeURIComponent(S.user):'')+'">Open in Drive ↗</a><button class="btn small" id="pvX">✕</button></div>'+
     '<div class="img">'+(isVid?'<iframe id="pvVid" src="https://drive.google.com/file/d/'+encodeURIComponent(id)+'/preview'+(S.user?'?authuser='+encodeURIComponent(S.user):'')+'" allow="autoplay; fullscreen" allowfullscreen></iframe>':'<img id="pvImg" src="'+(P.thumbs[id]||phThumbUrl(id,400))+'">')+(i>0?'<button class="nav l" id="pvL">‹</button>':'')+(i<flat.length-1?'<button class="nav r" id="pvR">›</button>':'')+'</div>'+
     '<div class="bot"><span id="pvTags"></span><span class="tagbox"><input id="pvIn" placeholder="Add tag (T)" autocomplete="off"><div class="tagsug" id="pvSug"></div></span><span id="pvRec"></span>'+
     '<button class="btn small" id="pvDel" title="Delete (Del)">🗑 Delete</button></div>';
@@ -2058,7 +2134,17 @@ function phViewer(id,swapping){
   if(!isVid){var big=new Image(); big.onload=function(){var im=$('#pvImg');if(im&&document.body.contains(v))im.src=big.src};
   big.onerror=function(){call('api_photoView',id).then(function(r){var im=$('#pvImg');if(im&&r.src)im.src=r.src}).catch(function(){})};
   big.src=phThumbUrl(id,2000);}
-  call('api_photoView',id,true).then(function(r){if(!document.body.contains(v))return;$('#pvInfo').textContent=[r.camera,r.location?'📍 '+(+r.location.latitude).toFixed(4)+', '+(+r.location.longitude).toFixed(4):''].filter(Boolean).join(' · ')}).catch(function(){});
+  call('api_photoView',id,true).then(function(r){if(!document.body.contains(v))return;$('#pvInfo').textContent=r.camera||''}).catch(function(){});
+  // where it was taken: town (tap to see every photo from there), your named place, and "Save as a place"
+  (function(){var lat=+p.lat,lng=+p.lng; if(typeof p.lat!=='number'||!isFinite(lat)) return;
+    phPlaces().then(function(){var el=$('#pvLoc');if(!el||!document.body.contains(v))return;var nm=phNamedAt(lat,lng);
+      el.innerHTML=(nm?'<button class="chip ghost" data-gl="'+esc(JSON.stringify({named:nm}))+'" title="All photos at this place">⭐ '+esc(nm)+'</button>':'')+
+        (p.town?'<button class="chip ghost" data-gl="'+esc(JSON.stringify({region:p.region,town:p.town}))+'" title="All photos from this town">📍 '+esc(p.town)+(p.region?', '+esc(p.region):'')+'</button>':'<span style="opacity:.7;font-size:12px">📍 town being looked up</span>')+
+        '<a class="chip ghost" target="_blank" href="https://www.google.com/maps?q='+lat+','+lng+'" title="Open in Google Maps">Map ↗</a>'+
+        (nm?'':'<button class="chip ghost" id="pvSp">＋ Save as a place</button>');
+      $$('#pvLoc [data-gl]').forEach(function(b){b.onclick=function(){var pl=JSON.parse(b.dataset.gl);close();P.tab='place';P.pl=pl;P.q='';viewPhotos();window.scrollTo(0,0)}});
+      if($('#pvSp')) $('#pvSp').onclick=function(){phSavePlace(lat,lng,p.town)};
+    }).catch(function(){})})();
   [flat[i+1],flat[i-1]].forEach(function(n){if(n){var pre=new Image();pre.src=phThumbUrl(n.id,2000)}});   // ready before you get there
   function swap(){v.remove();document.removeEventListener('keydown',key)}
   function close(fromBack){if(!document.body.contains(v))return;swap();if(!fromBack&&history.state&&history.state.phv){P.popSkip=1;history.back()}}

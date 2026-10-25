@@ -153,7 +153,26 @@ function flushHeaders_(budgetMs) {
   } finally { lock.releaseLock(); }
 }
 
+/** One-time fix: store tag names as plain text so names like "2018" aren't turned into numbers. */
+function fixTextFormats() {
+  ['Tags', 'Notes'].forEach(function (nm) {
+    var sh = ss_().getSheetByName(nm), cols = nm === 'Tags' ? [1, 2] : [col_('tags') + 1];
+    cols.forEach(function (c) {
+      var rg = sh.getRange(1, c, sh.getMaxRows(), 1), v = rg.getValues().map(function (r) { return [r[0] === '' ? '' : String(r[0])]; });
+      rg.setNumberFormat('@').setValues(v);
+    });
+  });
+  return 'ok';
+}
 
+/** One-time: move Cabinet notes that have no tags back to the Inbox. */
+function moveUntaggedCabinetToInbox() {
+  var t = notesTable_(), ids = [];
+  t.rows.forEach(function (r) { if (String(r[col_('notebook')]) === 'Cabinet' && !splitTags_(r[col_('tags')]).length) ids.push(r[col_('id')]); });
+  if (ids.length) api_batchUpdate(ids, { notebook: 'Inbox' });
+  Logger.log('Moved ' + ids.length + ' untagged Cabinet notes to the Inbox');
+  return ids.length;
+}
 
 /** Called by the app in the background; returns how many Doc header lines are still waiting. */
 function api_flushHeaders() { return flushHeaders_(20000); }
@@ -208,6 +227,7 @@ function processDrop() {
     try { syncPhotos_(Date.now() - 60000); } catch (e) { Logger.log('Photos: ' + e); }
     try { if (Date.now() - start < 200000) processMail_(Date.now(), 40000); } catch (e) { Logger.log('Mail: ' + e); }
     try { scanQueue_(90000); } catch (e) { Logger.log('Scan: ' + e); }
+    try { if (Date.now() - start < 230000) geoWork_(Date.now(), 45000); } catch (e) { Logger.log('Geo: ' + e); }
     try { if (Date.now() - start < 250000) photoDedupe_(40000); } catch (e) { Logger.log('Dedupe: ' + e); }
   } finally { lock.releaseLock(); }
   try { flushHeaders_(5000); } catch (e) {}
@@ -302,6 +322,22 @@ function api_uploadFile(name, mime, b64) {
 
 function api_dropFolderUrl() { return dropFolder_().getUrl(); }
 
+/** One-time: trash the uploaded "ArNote-import" working folder in Drive (restorable 30 days). */
+function trashImportFolder() {
+  var it = DriveApp.getFoldersByName('ArNote-import'), n = 0;
+  var attId = props_().getProperty('attId'), rootId = props_().getProperty('rootId');
+  while (it.hasNext()) {
+    var f = it.next(); if (f.isTrashed() || f.getId() === attId || f.getId() === rootId) continue;
+    // safety: only trash it if nothing ArNote uses lives inside (no sub-folders, no files besides the import list)
+    var subs = f.getFolders(), full = false; while (subs.hasNext()) { var s = subs.next(); if (s.getFiles().hasNext() || s.getFolders().hasNext()) full = true; }
+    if (full) { Logger.log('Skipped (a sub-folder still has files): ' + f.getUrl()); continue; }
+    var fi = f.getFiles(), ok = true; while (fi.hasNext()) { if (!/notes\.jsonl$/i.test(fi.next().getName())) ok = false; }
+    if (!ok) { Logger.log('Skipped (has other files): ' + f.getUrl()); continue; }
+    f.setTrashed(true); n++;
+  }
+  Logger.log('Trashed ' + n + ' ArNote-import folder(s)');
+  return n;
+}
 
 
 /* ---- Home screen extras: scratch pad + pinned note ---- */
@@ -458,6 +494,12 @@ function api_thumbs(ids) {
   return out;
 }
 
+/** One-time: rename the Drive folder and the Sheet to ArNote. */
+function renameToArNote() {
+  DriveApp.getFolderById(props_().getProperty('rootId')).setName('ArNote');
+  ss_().rename('ArNote');
+  return 'renamed';
+}
 
 /* ---------------- Linked notes ----------------
  * A linked note points at a file that stays where it is in Drive (Notes row: source = 'link', docId = that file).
@@ -1025,12 +1067,12 @@ function api_linkTree() {
  * Photos stay where they are in Drive (the "ArNote Photos" folder and everything under it). ArNote keeps only an index
  * in the Photos sheet: tags, inbox/filed, and when each photo was taken. Nothing is copied.
  */
-var PHOTO_COLS = ['fileId', 'name', 'taken', 'mime', 'folder', 'tags', 'status', 'added', 'w', 'h', 'scan'];
+var PHOTO_COLS = ['fileId', 'name', 'taken', 'mime', 'folder', 'tags', 'status', 'added', 'w', 'h', 'scan', 'lat', 'lng', 'town', 'region'];
 
 function photoSheet_() {
   var sh = ensureSheet_('Photos', PHOTO_COLS);
   if (!props_().getProperty('photoFmt')) { sh.getRange('A:G').setNumberFormat('@'); props_().setProperty('photoFmt', '1'); }   // keep dates/ids as plain text
-  if (sh.getRange(1, PHOTO_COLS.length).getValue() !== 'scan') sh.getRange(1, PHOTO_COLS.length).setValue('scan').setFontWeight('bold');
+  if (sh.getLastColumn() < PHOTO_COLS.length || sh.getRange(1, PHOTO_COLS.length).getValue() !== PHOTO_COLS[PHOTO_COLS.length - 1]) sh.getRange(1, 1, 1, PHOTO_COLS.length).setValues([PHOTO_COLS]).setFontWeight('bold');
   return sh;
 }
 
@@ -1068,7 +1110,7 @@ function syncPhotos_(start) {
     do {
       var res = driveApi_('files?pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true&q=' +
         encodeURIComponent("'" + dir.id + "' in parents and trashed = false") +
-        '&fields=' + encodeURIComponent('nextPageToken,files(id,name,mimeType,createdTime,imageMediaMetadata(time,width,height),videoMediaMetadata(width,height))') +
+        '&fields=' + encodeURIComponent('nextPageToken,files(id,name,mimeType,createdTime,imageMediaMetadata(time,width,height,location),videoMediaMetadata(width,height))') +
         (token ? '&pageToken=' + token : ''));
       (res.files || []).forEach(function (f) {
         if (f.mimeType === 'application/vnd.google-apps.folder') { queue.push({ id: f.id, path: dir.path ? dir.path + '/' + f.name : f.name }); return; }
@@ -1081,7 +1123,9 @@ function syncPhotos_(start) {
         }
         var md = f.imageMediaMetadata || f.videoMediaMetadata || {};
         var tk = photoTaken_(f, dir.path), recent = tk && (Date.now() - new Date(tk).getTime()) < 60 * 864e5;   // only new photos get read for receipts/cards
-        add.push([f.id, f.name, tk, f.mimeType, dir.path, /^video\//.test(f.mimeType) ? VIDEO_TAG : '', '', now, md.width || '', md.height || '', recent && /^image\//.test(f.mimeType) ? 'q' : '']);
+        var gl = (f.imageMediaMetadata || {}).location, hasL = gl && (gl.latitude || gl.longitude);
+        add.push([f.id, f.name, tk, f.mimeType, dir.path, /^video\//.test(f.mimeType) ? VIDEO_TAG : '', '', now, md.width || '', md.height || '', recent && /^image\//.test(f.mimeType) ? 'q' : '',
+          hasL ? Math.round(gl.latitude * 1e5) / 1e5 : (/^image\//.test(f.mimeType) ? '-' : '-'), hasL ? Math.round(gl.longitude * 1e5) / 1e5 : '', '', '']);
         known[f.id] = -1;
       });
       token = res.nextPageToken || '';
@@ -1268,7 +1312,7 @@ function api_photoUploadDone(items) {
   var tok = ScriptApp.getOAuthToken(), tz = Session.getScriptTimeZone(), now = new Date().toISOString();
   var res = UrlFetchApp.fetchAll(items.map(function (x) {
     return { url: 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(x.id) + '?supportsAllDrives=true&fields=' +
-      encodeURIComponent('id,name,mimeType,createdTime,imageMediaMetadata(time,width,height),videoMediaMetadata(width,height)'), headers: { Authorization: 'Bearer ' + tok }, muteHttpExceptions: true };
+      encodeURIComponent('id,name,mimeType,createdTime,imageMediaMetadata(time,width,height,location),videoMediaMetadata(width,height)'), headers: { Authorization: 'Bearer ' + tok }, muteHttpExceptions: true };
   }));
   var lock = LockService.getScriptLock(); lock.waitLock(30000);
   try {
@@ -1281,12 +1325,120 @@ function api_photoUploadDone(items) {
       if (tk === String(f.createdTime || '').slice(0, 19) && +items[i].modified)      // no camera date and no date in the name: use the phone's file date
         tk = Utilities.formatDate(new Date(+items[i].modified), tz, "yyyy-MM-dd'T'HH:mm:ss");
       var md = f.imageMediaMetadata || f.videoMediaMetadata || {}, recent = tk && (Date.now() - new Date(tk).getTime()) < 60 * 864e5;
-      add.push([f.id, f.name, tk, f.mimeType, 'Phone', /^video\//.test(f.mimeType) ? VIDEO_TAG : '', '', now, md.width || '', md.height || '', /^image\//.test(f.mimeType) ? 'q' : '']);   // you picked these: read them whatever their date
+      var gl = (f.imageMediaMetadata || {}).location, hasL = gl && (gl.latitude || gl.longitude);
+      add.push([f.id, f.name, tk, f.mimeType, 'Phone', /^video\//.test(f.mimeType) ? VIDEO_TAG : '', '', now, md.width || '', md.height || '', /^image\//.test(f.mimeType) ? 'q' : '',
+        hasL ? Math.round(gl.latitude * 1e5) / 1e5 : '-', hasL ? Math.round(gl.longitude * 1e5) / 1e5 : '', '', '']);   // you picked these: read them whatever their date
       known[f.id] = 1;
     });
     if (add.length) { if (add.some(function (a) { return a[5]; })) ensureTags_([VIDEO_TAG]); sh.getRange(sh.getLastRow() + 1, 1, add.length, PHOTO_COLS.length).setValues(add); }
     return add.length;
   } finally { lock.releaseLock(); }
+}
+
+/* ---------------- Photo locations ----------------
+ * Each photo keeps its GPS spot (from the photo itself) and a town name looked up once per ~2 km square.
+ * Columns: lat, lng ('-' = checked, no location), town, region (US state like "WV", or the country abroad).
+ * Your own named places (Script Property 'places': [{name, lat, lng, r (metres)}]) are matched when read, never stored per photo.
+ */
+function geoKey_(lat, lng) { return (Math.round(lat * 50) / 50).toFixed(2) + ',' + (Math.round(lng * 50) / 50).toFixed(2); }
+function geoCache_() {
+  var sh = ensureSheet_('GeoCache', ['key', 'town', 'region']), map = {}, add = [];
+  if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues().forEach(function (r) { map[String(r[0])] = { town: String(r[1]), region: String(r[2]) }; });
+  return { map: map, add: function (k, c) { map[k] = c; add.push([k, c.town, c.region]); },
+    save: function () { if (add.length) sh.getRange(sh.getLastRow() + 1, 1, add.length, 3).setValues(add); add = []; } };
+}
+function reverseGeo_(lat, lng) {
+  var r = Maps.newGeocoder().reverseGeocode(lat, lng);
+  if (r.status === 'OVER_QUERY_LIMIT' || r.status === 'REQUEST_DENIED') throw new Error(r.status);
+  var res = r.results || [];
+  function find(type, short) { for (var i = 0; i < res.length; i++) { var cs = res[i].address_components || []; for (var j = 0; j < cs.length; j++) if (cs[j].types.indexOf(type) >= 0) return short ? cs[j].short_name : cs[j].long_name; } return ''; }
+  var country = find('country', true);
+  var town = find('locality') || find('postal_town') || find('administrative_area_level_3') || find('administrative_area_level_2') || '(no town)';
+  var region = country === 'US' ? (find('administrative_area_level_1', true) || 'US') : (find('country') || '(at sea)');
+  return { town: town, region: region };
+}
+function placesList_() { try { return JSON.parse(props_().getProperty('places') || '[]'); } catch (e) { return []; } }
+function metres_(a, b, c, d) { var R = 6371000, r = Math.PI / 180, x = (d - b) * r * Math.cos((a + c) / 2 * r), y = (c - a) * r; return Math.sqrt(x * x + y * y) * R; }
+/** The named place a spot falls in (the closest one whose circle it is inside), or ''. */
+function namedAt_(lat, lng, places) {
+  var best = '', bd = 1e12;
+  (places || []).forEach(function (p) { var m = metres_(lat, lng, +p.lat, +p.lng); if (m <= +p.r && m < bd) { bd = m; best = p.name; } });
+  return best;
+}
+function api_places(list) {
+  if (list) {
+    var clean = (list || []).map(function (p) { return { name: String(p.name || '').trim().slice(0, 40), lat: Math.round(+p.lat * 1e5) / 1e5, lng: Math.round(+p.lng * 1e5) / 1e5, r: Math.max(50, Math.min(50000, Math.round(+p.r || 1000))) }; })
+      .filter(function (p) { return p.name && isFinite(p.lat) && isFinite(p.lng); });
+    props_().setProperty('places', JSON.stringify(clean));
+  }
+  return placesList_();
+}
+/** Filters shared by the gallery calls: o.region, o.town, o.named, o.nolocation, o.q (search words). */
+function placeOk_(p, o, places) {
+  if (o.region && p.region !== o.region) return false;
+  if (o.town && p.town !== o.town) return false;
+  if (o.nolocation && typeof p.lat === 'number') return false;
+  if (o.named) { if (typeof p.lat !== 'number' || namedAt_(p.lat, p.lng, places) !== o.named) return false; }
+  if (o.q) {
+    var hay = [p.name, p.tags.join(' '), p.town, p.region, p.folder, typeof p.lat === 'number' ? namedAt_(p.lat, p.lng, places) : ''].join(' ').toLowerCase();
+    if (!String(o.q).toLowerCase().split(/\s+/).filter(String).every(function (w) { return hay.indexOf(w) >= 0; })) return false;
+  }
+  return true;
+}
+/** Counts for Photos → By place. */
+function api_photoPlaces() {
+  var rows = photoRows_(), places = placesList_(), regions = {}, named = {}, withLoc = 0, pending = 0, none = 0;
+  rows.forEach(function (p) {
+    if (p.lat === '') { if (/^image\//.test(p.mime)) pending++; return; }
+    if (typeof p.lat !== 'number') { none++; return; }
+    withLoc++;
+    if (p.town) { var g = regions[p.region] = regions[p.region] || {}; g[p.town] = (g[p.town] || 0) + 1; }
+    var n = namedAt_(p.lat, p.lng, places); if (n) named[n] = (named[n] || 0) + 1;
+  });
+  return { regions: regions, named: named, places: places, withLoc: withLoc, none: none, pending: pending };
+}
+/** Background work: read GPS for photos not checked yet, then name the towns. Safe to run repeatedly. */
+function geoWork_(start, budget) {
+  start = start || Date.now(); budget = budget || 60000;
+  var sh = photoSheet_(), n = sh.getLastRow() - 1; if (n < 1) return { coords: 0, named: 0, left: 0 };
+  var C = PHOTO_COLS.indexOf('lat'), v = sh.getRange(2, 1, n, PHOTO_COLS.length).getValues(), tok = ScriptApp.getOAuthToken(), dirty = false, coords = 0, named = 0;
+  var need = [];
+  v.forEach(function (r, i) { if (r[C] === '') { if (/^image\//.test(r[3])) need.push(i); else { r[C] = '-'; dirty = true; } } });
+  for (var k = 0; k < need.length && Date.now() - start < budget * 0.6; k += 40) {
+    var part = need.slice(k, k + 40);
+    UrlFetchApp.fetchAll(part.map(function (i) {
+      return { url: 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(v[i][0]) + '?supportsAllDrives=true&fields=imageMediaMetadata(location)', headers: { Authorization: 'Bearer ' + tok }, muteHttpExceptions: true };
+    })).forEach(function (r, j) {
+      var i = part[j], code = r.getResponseCode(), loc = null;
+      if (code !== 200 && code !== 404) return;                      // try again next time
+      try { loc = code === 200 ? (JSON.parse(r.getContentText()).imageMediaMetadata || {}).location : null; } catch (e) {}
+      if (loc && (loc.latitude || loc.longitude)) { v[i][C] = Math.round(loc.latitude * 1e5) / 1e5; v[i][C + 1] = Math.round(loc.longitude * 1e5) / 1e5; coords++; }
+      else v[i][C] = '-';
+      dirty = true;
+    });
+  }
+  var cache = geoCache_(), miss = {}, stop = false;
+  v.forEach(function (r, i) {
+    if (typeof r[C] !== 'number' || r[C + 2]) return;
+    var key = geoKey_(r[C], r[C + 1]), c = cache.map[key];
+    if (c) { r[C + 2] = c.town; r[C + 3] = c.region; dirty = true; named++; } else (miss[key] = miss[key] || []).push(i);
+  });
+  Object.keys(miss).forEach(function (key) {
+    if (stop || Date.now() - start > budget) return;
+    var first = v[miss[key][0]], c;
+    try { c = reverseGeo_(first[C], first[C + 1]); } catch (e) { stop = true; return; }   // Google's daily limit: carry on tomorrow
+    cache.add(key, c);
+    miss[key].forEach(function (i) { v[i][C + 2] = c.town; v[i][C + 3] = c.region; named++; });
+    dirty = true;
+  });
+  cache.save();
+  if (dirty) sh.getRange(2, C + 1, n, 4).setValues(v.map(function (r) { return [r[C], r[C + 1], r[C + 2], r[C + 3]]; }));
+  var left = v.filter(function (r) { return r[C] === '' && /^image\//.test(r[3]); }).length + v.filter(function (r) { return typeof r[C] === 'number' && !r[C + 2]; }).length;
+  return { coords: coords, named: named, left: left };
+}
+function api_geoRun() {
+  var lock = LockService.getScriptLock(); if (!lock.tryLock(20000)) throw new Error('ArNote is busy; try again in a minute');
+  try { return geoWork_(Date.now(), 200000); } finally { lock.releaseLock(); }
 }
 
 function api_photoSyncNow() { var r = syncPhotos_(Date.now() - 180000); return r; }   // ~60 seconds from the app
@@ -1295,7 +1447,8 @@ function photoRows_() {
   var sh = photoSheet_(), v = sh.getDataRange().getValues(); v.shift();
   return v.map(function (r, i) {
     return { id: String(r[0]), name: String(r[1]), taken: r[2] instanceof Date ? r[2].toISOString() : String(r[2]), mime: String(r[3]),
-      folder: String(r[4]), tags: splitTags_(r[5]), status: String(r[6]), w: +r[8] || 0, h: +r[9] || 0, scan: String(r[10] || ''), row: i + 2 };
+      folder: String(r[4]), tags: splitTags_(r[5]), status: String(r[6]), w: +r[8] || 0, h: +r[9] || 0, scan: String(r[10] || ''),
+      lat: typeof r[11] === 'number' ? r[11] : String(r[11] === undefined ? '' : r[11]), lng: typeof r[12] === 'number' ? r[12] : '', town: String(r[13] || ''), region: String(r[14] || ''), row: i + 2 };
   });
 }
 
@@ -1309,8 +1462,9 @@ function tagSet_(tag, exact) {
 /** One page of photos. o: {view: 'inbox'|'filed'|'all', tag, year, month, folder, offset, limit} */
 function api_photos(o) {
   o = o || {};
-  var rows = photoRows_(), set = o.tag ? tagSet_(o.tag, o.exact) : null;
+  var rows = photoRows_(), set = o.tag ? tagSet_(o.tag, o.exact) : null, places = placesList_();
   var list = rows.filter(function (p) {
+    if (!placeOk_(p, o, places)) return false;
     if (o.view === 'inbox' && p.status) return false;
     if (o.view === 'filed' && p.status !== 'filed') return false;
     if (o.view === 'untagged' && !untagged_(p)) return false;
@@ -1418,8 +1572,9 @@ function retagPhotos_(fn) {
 /** Timeline for the Photos grid: how many photos per month (newest first) for the same filters as api_photos. */
 function api_photoMonths(o) {
   o = o || {};
-  var rows = photoRows_(), set = o.tag ? tagSet_(o.tag, o.exact) : null, m = {};
+  var rows = photoRows_(), set = o.tag ? tagSet_(o.tag, o.exact) : null, m = {}, places = placesList_();
   rows.forEach(function (p) {
+    if (!placeOk_(p, o, places)) return;
     if (o.view === 'inbox' && p.status) return;
     if (o.view === 'filed' && p.status !== 'filed') return;
     if (o.view === 'untagged' && !untagged_(p)) return;
