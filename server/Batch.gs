@@ -1088,6 +1088,9 @@ function syncPhotos_(start) {
     } while (token && Date.now() - start < 240000);
     if (token) { complete = false; break; }
   }
+  if (add.length <= 25) add.forEach(function (a) {      // a few photos added by hand get read whatever their date; bulk imports and Takeout year folders don't
+    if (!a[10] && /^image\//.test(a[3]) && !/^Photos from /.test(a[4])) a[10] = 'q';
+  });
   if (add.length) sh.getRange(sh.getLastRow() + 1, 1, add.length, PHOTO_COLS.length).setValues(add);
   fix.forEach(function (x) { sh.getRange(x[0], 3).setValue(x[1]); });
   var removed = 0;
@@ -1278,7 +1281,7 @@ function api_photoUploadDone(items) {
       if (tk === String(f.createdTime || '').slice(0, 19) && +items[i].modified)      // no camera date and no date in the name: use the phone's file date
         tk = Utilities.formatDate(new Date(+items[i].modified), tz, "yyyy-MM-dd'T'HH:mm:ss");
       var md = f.imageMediaMetadata || f.videoMediaMetadata || {}, recent = tk && (Date.now() - new Date(tk).getTime()) < 60 * 864e5;
-      add.push([f.id, f.name, tk, f.mimeType, 'Phone', /^video\//.test(f.mimeType) ? VIDEO_TAG : '', '', now, md.width || '', md.height || '', recent && /^image\//.test(f.mimeType) ? 'q' : '']);
+      add.push([f.id, f.name, tk, f.mimeType, 'Phone', /^video\//.test(f.mimeType) ? VIDEO_TAG : '', '', now, md.width || '', md.height || '', /^image\//.test(f.mimeType) ? 'q' : '']);   // you picked these: read them whatever their date
       known[f.id] = 1;
     });
     if (add.length) { if (add.some(function (a) { return a[5]; })) ensureTags_([VIDEO_TAG]); sh.getRange(sh.getLastRow() + 1, 1, add.length, PHOTO_COLS.length).setValues(add); }
@@ -1483,6 +1486,8 @@ function classifyText_(text) {
   var phone = all.match(/\(?\b\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b/), email = all.match(/[\w.+-]+@[\w-]+\.[\w.]+/), web = all.match(/\b(?:www\.)?[\w-]+\.(?:com|net|org|biz|co|us|io)\b/i);
   if (/\btotal\b/i.test(all) && prices >= 2 && rcptWords >= 2) return { kind: 'receipt', fields: receiptFields_(lines, all) };
   if (rcptWords >= 4 && prices >= 3) return { kind: 'receipt', fields: receiptFields_(lines, all) };
+  if (prices >= 1 && /\b(total|amount)\b/i.test(all) && (/(x{4,}|\*{4,})\s?\d{2,4}\b/i.test(all) || /\b(visa|mastercard|master card|amex|american express|discover|debit)\b/i.test(all)))
+    return { kind: 'receipt', fields: receiptFields_(lines, all) };          // a card machine slip: one amount, a card, "Total"/"Amount"
   if (lines.length <= 16 && words <= 70 && (phone || email) && prices <= 1) {     // a card has a phone or email AND a person's name (or both phone and email); a website alone is a sign, not a card
     var cf = cardFields_(lines, email, phone, web);
     if (cf.name || (phone && email)) return { kind: 'card', fields: cf };
@@ -1496,12 +1501,12 @@ function classifyText_(text) {
 }
 
 function receiptFields_(lines, all) {
-  var skip = /^(welcome|receipt|sales receipt|customer copy|merchant copy|thank|you|store|order|invoice|tel|phone|server|table|guests?|cashier|date|time|expect|visit|www)\b/i;
+  var skip = /^(welcome|receipt|sales receipt|customer copy|merchant copy|thank|you|store|order|invoice|tel|phone|server|table|guests?|cashier|date|time|expect|visit|www|bank|merchant|term|terminal|sale)\b/i;
   var vendor = '';
   for (var i = 0; i < Math.min(lines.length, 6) && !vendor; i++) {
     var l = lines[i];
-    if (skip.test(l) || /\d{3}[-.\s]\d{4}/.test(l) || /^\d/.test(l) || (l.match(/[A-Za-z]/g) || []).length < 3) continue;
-    vendor = l.replace(/[^\w&'.,\- ]/g, '').trim().slice(0, 40);
+    if (skip.test(l) || /^\(?\d{3}\)?[-.\s]\d{3}/.test(l) || /^\d/.test(l) || (l.match(/[A-Za-z]/g) || []).length < 3) continue;
+    vendor = l.replace(/[^\w&'.,\- ]/g, '').replace(/\s+#?\d{2,}\b.*$/, '').trim().slice(0, 40);   // "Sheetz 147 5 N 3rd St" → "Sheetz"
   }
   var date = '', m;
   if ((m = all.match(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/))) {
@@ -1541,7 +1546,7 @@ function receiptFields_(lines, all) {
   }
   if (total === null) { var allAmt = moneyIn_(all); if (allAmt.length) total = Math.max.apply(null, allAmt); }
   var card = (all.match(/(?:x{2,}|\*+|#{2,}|ending in|acct:?)\s*(\d{4})\b/i) || all.match(/\b(\d{4})\s+(?:visa|mc|mastercard|amex|discover|debit)\b/i) || [])[1] || '';
-  var pay = card ? 'card' : /\bcash\b/i.test(all) ? 'cash' : '';
+  var pay = card || /\b(visa|mastercard|master card|amex|american express|discover|debit|credit card)\b/i.test(all) ? 'card' : /\bcash\b/i.test(all) ? 'cash' : '';
   return { vendor: vendor, date: date, total: total, tax: tax, card: card, pay: pay, check: (!vendor || !date || total === null) ? 'check' : '' };
 }
 
@@ -1705,7 +1710,7 @@ function api_receipts() {
     var tags = splitTags_(note.tags), card = last4_(o.card); if (card) seenCards[card] = 1;
     var date = o.date instanceof Date ? Utilities.formatDate(o.date, tz, 'yyyy-MM-dd') : String(o.date || '').slice(0, 10);
     var pay = String(o.pay || '') || (card ? 'card' : '');
-    var paid = pay === 'cash' ? 'Cash' : pay === 'check' ? 'Check' + (o.checkNo ? ' #' + o.checkNo : '') : card ? (cfg.cards[card] || '…' + card) : '';
+    var paid = pay === 'cash' ? 'Cash' : pay === 'check' ? 'Check' + (o.checkNo ? ' #' + o.checkNo : '') : card ? (cfg.cards[card] || '…' + card) : pay === 'card' ? 'Card' : '';
     var total = o.total === '' || o.total === null ? null : +o.total, tax = o.tax === '' || o.tax === null ? null : +o.tax;
     rows.push({ noteId: String(o.noteId), fileId: String(o.fileId), title: String(note.title), date: date, vendor: String(o.vendor || ''), total: total, tax: tax,
       card: card, pay: pay, checkNo: String(o.checkNo || ''), paid: paid,
