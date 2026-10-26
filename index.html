@@ -176,7 +176,8 @@ body.phsel .toast{bottom:calc(var(--phBarH,60px) + 14px)}
 @media (max-width:600px){.wide.photosv{padding-right:44px}.scrub{width:40px}.scrub .bub{right:38px}}
 .phv{position:fixed;inset:0;z-index:60;background:#0b0b0d;display:flex;flex-direction:column;color:#eee}
 .phv .top{display:flex;gap:8px;align-items:center;padding:10px 14px;flex-wrap:wrap}.phv .top .grow{flex:1}
-.phmap{height:58vh;min-height:300px;border-radius:10px;overflow:hidden;margin-top:6px;background:#222}
+.phmap{height:58vh;min-height:300px;border-radius:10px;overflow:hidden;margin-top:6px;background:#222;position:relative;z-index:0;isolation:isolate}
+.phdot{background:#e8743b;border:2px solid #fff;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.5)}
 .phpin{background:none;border:none}.phpin img{width:44px;height:44px;object-fit:cover;border-radius:8px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5);background:#444}
 .phpin span{position:absolute;right:3px;bottom:2px;color:#fff;font-size:11px;text-shadow:0 0 3px #000}
 .phstar{background:rgba(0,0,0,.65);color:#fff;border-radius:10px;padding:2px 7px;font-size:12px;white-space:nowrap;width:auto!important;height:auto!important}
@@ -1949,16 +1950,19 @@ function phPoints(){if(P.pts&&Date.now()-P.pts._t<120000)return Promise.resolve(
   return call('api_photoPoints').then(function(r){r._t=Date.now();P.pts=r;return r})}
 function phMap(){
   if(P.box){var mb=$('#phMapBar');if(mb){mb.innerHTML='<button class="btn small" id="mpBack">‹ Back to the map</button><span class="muted" style="font-size:13px">Photos in the area you picked</span>';
-    $('#mpBack').onclick=function(){P.box=null;viewPhotos();window.scrollTo(0,0)}}return}
+    $('#mpBack').onclick=function(){if(history.state&&history.state.mapArea)history.back();else{P.box=null;viewPhotos();window.scrollTo(0,0)}}}return}
   var el=$('#phMap'); if(!el) return; el.innerHTML='<p class="muted" style="padding:12px">Loading map…</p>';
   Promise.all([phLeaflet(),phPoints(),phPlaces()]).then(function(r){
     var pts=r[1], pp=r[2]; el=$('#phMap'); if(!el||S.view!=='photos'||P.tab!=='map') return; el.innerHTML='';
     var map=L.map(el,{zoomControl:true,worldCopyJump:true}); P.map=map;
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
-    var cl=L.markerClusterGroup({showCoverageOnHover:false,maxClusterRadius:60,spiderfyOnMaxZoom:true});
-    pts.forEach(function(p){
-      var m=L.marker([p[1],p[2]],{icon:L.divIcon({className:'phpin',html:'<img loading="lazy" src="'+phThumbUrl(p[0],120)+'">'+(p[3]?'<span>▶</span>':''),iconSize:[44,44]})});
-      m.on('click',function(){phMapOpen(p)}); cl.addLayer(m)});
+    // a circle: zoom in while it's big; once it's a few photos in a small area, open them in the gallery
+    var cl=L.markerClusterGroup({showCoverageOnHover:false,maxClusterRadius:60,zoomToBoundsOnClick:false,spiderfyOnMaxZoom:false});
+    cl.on('clusterclick',function(e){var c=e.layer,b=c.getBounds(),wide=b.getNorthEast().distanceTo(b.getSouthWest());
+      if(c.getChildCount()<=30||wide<800||map.getZoom()>=16) phMapArea(b.pad(0.15)); else c.zoomToBounds({padding:[30,30]})});
+    var dot=L.divIcon({className:'phdot',iconSize:[12,12]});
+    pts.forEach(function(p){var m=L.marker([p[1],p[2]],{icon:dot});
+      m.on('click',function(){var d=0.0015;phMapArea(L.latLngBounds([p[1]-d,p[2]-d],[p[1]+d,p[2]+d]))}); cl.addLayer(m)});
     map.addLayer(cl);
     (pp.places||[]).forEach(function(q){L.circle([q.lat,q.lng],{radius:q.r,color:'#e6b422',weight:1,fillOpacity:.08}).addTo(map);
       L.marker([q.lat,q.lng],{icon:L.divIcon({className:'phstar',html:'⭐ '+esc(q.name),iconSize:null}),interactive:false}).addTo(map)});
@@ -1969,18 +1973,23 @@ function phMap(){
       P.mapView={c:map.getCenter(),z:map.getZoom()};
       var mb=$('#phMapBar');if(!mb)return;
       mb.innerHTML='<button class="btn small primary" id="mpShow"'+(n?'':' disabled')+'>Show the '+n+' photo'+(n===1?'':'s')+' in this area</button>'+
-        (P.box?'<button class="btn small" id="mpClr">Clear</button><span class="muted" style="font-size:12px">Showing a saved area below — move the map and press Show again to change it</span>':'<span class="muted" style="font-size:12px">Tap a circle to zoom in · '+pts.length+' photos have a location</span>');
-      $('#mpShow').onclick=function(){var b2=map.getBounds();P.box=[b2.getSouth(),b2.getWest(),b2.getNorth(),b2.getEast()].map(function(x){return Math.round(x*1e5)/1e5});P.back=null;viewPhotos();window.scrollTo(0,0)};
+        '<span class="muted" style="font-size:12px">Tap a circle to zoom in — a small group opens as photos · '+pts.length+' photos have a location</span>';
+      $('#mpShow').onclick=function(){phMapArea(map.getBounds())};
       if($('#mpClr'))$('#mpClr').onclick=function(){P.box=null;viewPhotos()}}
     map.on('moveend',bar); bar();
     setTimeout(function(){map.invalidateSize()},100);
   }).catch(function(e){var x=$('#phMap');if(x)x.innerHTML='<p class="muted" style="padding:12px">'+esc(e.message||'Map not available')+'</p>'});
 }
-/** Open a photo from the map. */
-function phMapOpen(p){
-  if(P.byId[p[0]]){phViewer(p[0]);return}
-  var d=0.00002; call('api_photos',{view:'all',box:[p[1]-d,p[2]-d,p[1]+d,p[2]+d],limit:50}).then(function(r){r.items.forEach(function(x){P.byId[x.id]=x});if(P.byId[p[0]])phViewer(p[0])}).catch(function(e){toast(e.message)});
+/** Swap the map for the gallery of photos inside these bounds (phone/browser Back returns to the map). */
+function phMapArea(b){
+  if(P.map){P.mapView={c:P.map.getCenter(),z:P.map.getZoom()}}
+  P.box=[b.getSouth(),b.getWest(),b.getNorth(),b.getEast()].map(function(x){return Math.round(x*1e5)/1e5});P.back=null;
+  history.pushState({mapArea:1},''); viewPhotos(); window.scrollTo(0,0);
 }
+window.addEventListener('popstate',function(){
+  if($('#phv')||!(S.view==='photos'&&P.tab==='map'&&P.box)||(history.state&&history.state.mapArea)) return;
+  P.box=null; viewPhotos(); window.scrollTo(0,0);
+});
 /* ----- timeline ----- */
 function phCols(){var w=($('#phTL')||{}).clientWidth||800;if(window.innerWidth<=600)return 3;return Math.max(2,Math.floor((w+4)/(150+4)))}
 function phTimeline(){
