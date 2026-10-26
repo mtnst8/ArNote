@@ -239,6 +239,7 @@ function processDrop() {
     try { syncPhotos_(Date.now() - 60000); } catch (e) { Logger.log('Photos: ' + e); }
     try { if (Date.now() - start < 200000) processMail_(Date.now(), 40000); } catch (e) { Logger.log('Mail: ' + e); }
     try { scanQueue_(90000); } catch (e) { Logger.log('Scan: ' + e); }
+    try { licenceDaily_(); } catch (e) { Logger.log('Licence: ' + e); }
     try { if (Date.now() - start < 170000) backupDaily_(); } catch (e) { Logger.log('Backup: ' + e); }
     try { buildReceiptReport_(); } catch (e) { Logger.log('Receipt report: ' + e); }
     try { if (Date.now() - start < 230000) geoWork_(Date.now(), 45000); } catch (e) { Logger.log('Geo: ' + e); }
@@ -435,9 +436,14 @@ function doPost(e) {
       out = { ok: true, result: shareDispatch_(req.s, String(req.fn || ''), Array.isArray(req.a) ? req.a : []) };
       return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
     }
+    if (req.lic === 'check') {                     // another ArNote checking in with Brian's (no key: it only says yes/no)
+      out = { ok: true, result: isLicenceServer_() ? licCheck_(req) : { ok: false, reason: 'not a licence server' } };
+      return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+    }
     var key = props_().getProperty('apiKey');
     if (!key || typeof req.k !== 'string' || req.k !== key) throw new Error('Not authorized: this device needs to be paired again');
     var fn = String(req.fn || '');
+    if (fn !== 'api_appInfo' && !licenceState_().ok) throw new Error('ArNote access has ended for this account. Your notes and photos are still in your Google Drive.');
     if (!/^api_[A-Za-z0-9]+$/.test(fn) || typeof globalThis[fn] !== 'function') throw new Error('Unknown action: ' + fn);
     out = { ok: true, result: globalThis[fn].apply(null, Array.isArray(req.a) ? req.a : []) };
   } catch (err) {
@@ -470,7 +476,88 @@ function pairingLink_(serverUrl, key) {
 function api_appInfo() {
   var drop = null; try { drop = dropFolder_().getUrl(); } catch (e) {}
   var link = null; try { link = linkFolder_().getUrl(); } catch (e) {}
-  return { user: Session.getEffectiveUser().getEmail(), dropUrl: drop, linkUrl: link, version: 2 };
+  noteUsed_();
+  return { user: Session.getEffectiveUser().getEmail(), dropUrl: drop, linkUrl: link, version: 2, build: ARNOTE_BUILD, licence: licenceState_() };
+}
+
+/* ---------------- People using ArNote (licence) ----------------
+ * Brian's own ArNote (this script ID) is the licence server and keeps the "Users" sheet.
+ * Every other copy checks in once a day with its owner's email, an install id, its build and the last day the app was opened —
+ * nothing else (no notes, tags or photos). Someone removed (or never added) gets ok:false and their app shows
+ * "access ended"; their notes and photos in their own Drive are never touched. */
+var ARNOTE_BUILD = 57;
+var LICENCE_SCRIPT_ID = '1NmFRd6lH63u-JBeTJfg0IyMZtDJj6jxw8WNfbOdh_TSTuOpVZ5JJ2s4B';
+var LICENCE_URL = 'https://script.google.com/macros/s/AKfycbyFPAGYJE1bVycoBv8QamFeUHuBjbCAhogOM8mSU7vn20CVO_Ex1XJYfRy7f7lZES-_Kg/exec';
+var USER_COLS = ['email', 'name', 'status', 'plan', 'added', 'lastUsed', 'lastCheckin', 'build', 'install', 'note'];
+function isLicenceServer_() { return ScriptApp.getScriptId() === LICENCE_SCRIPT_ID; }
+function today_() { return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'); }
+function noteUsed_() { var p = props_(), d = today_(); if (p.getProperty('lastUsed') !== d) p.setProperty('lastUsed', d); }
+function usersSheet_() { if (!isLicenceServer_()) throw new Error('Only the owner can manage people'); return ensureSheet_('Users', USER_COLS); }
+function userRows_() {
+  var sh = usersSheet_(), n = sh.getLastRow() - 1, tz = Session.getScriptTimeZone(); if (n < 1) return { sh: sh, rows: [] };
+  var d = function (x) { return x instanceof Date ? Utilities.formatDate(x, tz, 'yyyy-MM-dd') : String(x || ''); };
+  return { sh: sh, rows: sh.getRange(2, 1, n, USER_COLS.length).getValues().map(function (r, i) {
+    var o = { row: i + 2 }; USER_COLS.forEach(function (c, j) { o[c] = /^(added|lastUsed|lastCheckin)$/.test(c) ? d(r[j]) : String(r[j] === null ? '' : r[j]); }); o.email = o.email.toLowerCase(); return o; }) };
+}
+function api_users() { return userRows_().rows.map(function (u) { delete u.row; delete u.install; return u; }); }
+function api_userAdd(email, name, note) {
+  email = String(email || '').trim().toLowerCase(); if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('That isn\'t an email address');
+  var t = userRows_(); if (t.rows.some(function (u) { return u.email === email; })) throw new Error(email + ' is already on the list');
+  t.sh.appendRow([email, String(name || '').trim().slice(0, 60), 'active', 'free', today_(), '', '', '', '', String(note || '').slice(0, 200)]);
+  return api_users();
+}
+/** ch: {status: 'active'|'removed', name, plan, note} */
+function api_userSet(email, ch) {
+  email = String(email || '').toLowerCase(); var t = userRows_(), u = t.rows.filter(function (x) { return x.email === email; })[0];
+  if (!u) throw new Error('Not on the list'); ch = ch || {};
+  if (ch.status !== undefined) t.sh.getRange(u.row, 3).setValue(ch.status === 'removed' ? 'removed' : 'active');
+  if (ch.name !== undefined) t.sh.getRange(u.row, 2).setValue(String(ch.name).slice(0, 60));
+  if (ch.plan !== undefined) t.sh.getRange(u.row, 4).setValue(String(ch.plan).slice(0, 20));
+  if (ch.note !== undefined) t.sh.getRange(u.row, 10).setValue(String(ch.note).slice(0, 200));
+  return api_users();
+}
+/** Take someone off the list entirely (typos, test entries). To stop someone using ArNote, set them to removed instead — that keeps the record. */
+function api_userDelete(email) {
+  email = String(email || '').toLowerCase(); var t = userRows_(), u = t.rows.filter(function (x) { return x.email === email; })[0];
+  if (u) t.sh.deleteRow(u.row);
+  return api_users();
+}
+function licCheck_(req) {
+  var email = String(req.email || '').trim().toLowerCase(); if (!email) return { ok: false, status: 'unknown' };
+  var lock = LockService.getScriptLock(); try { lock.waitLock(10000); } catch (e) {}
+  try {
+    var t = userRows_(), u = t.rows.filter(function (x) { return x.email === email; })[0];
+    if (!u) return { ok: false, status: 'unknown' };
+    var used = /^\d{4}-\d\d-\d\d$/.test(String(req.lastUsed || '')) ? String(req.lastUsed) : '';
+    t.sh.getRange(u.row, 6, 1, 4).setValues([[used && used > u.lastUsed ? used : u.lastUsed, today_(), String(+req.build || ''), String(req.install || '').slice(0, 60)]]);
+    return { ok: u.status === 'active', status: u.status, plan: u.plan };
+  } finally { try { lock.releaseLock(); } catch (e) {} }
+}
+/** This copy asks Brian's ArNote whether it may run. Stored with the time; failures keep the last answer. */
+function licenceCheck_() {
+  if (isLicenceServer_()) return { ok: true, owner: true };
+  var p = props_(), inst = p.getProperty('installId'); if (!inst) { inst = Utilities.getUuid(); p.setProperty('installId', inst); }
+  var res = null;
+  try {
+    var r = UrlFetchApp.fetch(LICENCE_URL, { method: 'post', contentType: 'text/plain', muteHttpExceptions: true,
+      payload: JSON.stringify({ lic: 'check', email: Session.getEffectiveUser().getEmail(), install: inst, build: ARNOTE_BUILD, lastUsed: p.getProperty('lastUsed') || '' }) });
+    res = (JSON.parse(r.getContentText()) || {}).result;
+  } catch (e) { Logger.log('Licence check: ' + e); }
+  if (res && typeof res.ok === 'boolean') { res.at = new Date().toISOString(); p.setProperty('licence', JSON.stringify(res)); return res; }
+  return null;
+}
+function licenceDaily_() {
+  if (isLicenceServer_()) return;
+  var l = {}; try { l = JSON.parse(props_().getProperty('licence') || '{}'); } catch (e) {}
+  if (!l.at || Date.now() - new Date(l.at).getTime() > 20 * 3600e3) licenceCheck_();
+}
+/** ok unless Brian's list says removed/unknown. Never checked yet → check now. Can't reach Brian's for 14 days → still ok (grace). */
+function licenceState_() {
+  if (isLicenceServer_()) return { ok: true, owner: true };
+  var l = null; try { l = JSON.parse(props_().getProperty('licence') || 'null'); } catch (e) {}
+  if (!l) l = licenceCheck_();
+  if (!l) return { ok: true, status: 'unchecked' };
+  return { ok: !!l.ok, status: l.status, plan: l.plan, at: l.at };
 }
 
 /** Note body as clean HTML for the app's reading view (header line removed), plus attachments. */

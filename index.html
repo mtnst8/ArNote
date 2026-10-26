@@ -1523,6 +1523,7 @@ function viewSettings(){
     '<h3 style="margin:16px 0 4px;font-size:15px">Receipts</h3><div id="rcpt" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Photo places</h3><div id="plset" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Backup</h3><div id="bkset" class="muted" style="font-size:13px">Loading…</div>'+
+    (S.lic&&S.lic.owner?'<h3 style="margin:16px 0 4px;font-size:15px">People using ArNote</h3><div id="ppl" class="muted" style="font-size:13px">Loading…</div>':'')+
     '<h3 style="margin:16px 0 4px;font-size:15px">Shared links</h3><div id="sset" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Google accounts</h3><div id="acct" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Linked Drive folders</h3><div id="lfold" class="muted" style="font-size:13px">Loading…</div>'+
@@ -1531,7 +1532,7 @@ function viewSettings(){
     '<p class="muted" style="font-size:12px;margin-top:14px">ArNote · your notes stay in your own Google Drive.</p></div>';
   $('#cpPair').onclick=function(){var l=pairLink();(navigator.clipboard?navigator.clipboard.writeText(l):Promise.reject()).then(function(){toast('Pairing link copied')}).catch(function(){prompt('Copy this link:',l)})};
   if($('#shPair')) $('#shPair').onclick=function(){navigator.share({title:'ArNote pairing link',text:pairLink()}).catch(function(){})};
-  drawMailSet(); drawPlaceSet(); drawBackupSet();
+  drawMailSet(); drawPlaceSet(); drawBackupSet(); if(S.lic&&S.lic.owner) drawPeople();
   call('api_linkedFolders').then(function(fs){var el=$('#lfold');if(!el)return;
     el.innerHTML=fs.length?fs.map(function(f){return '<div class="setrow"><span>📁 '+esc(f.name)+'</span><button class="btn small" data-uw="'+esc(f.id)+'">Stop syncing</button></div>'}).join('')+
       '<p style="margin:4px 0 0">New files in these folders are added to the Cabinet every 15 minutes. Stopping keeps the notes already made.</p>':'None yet. Link a folder from Inbox → 🔗 Link Drive files.';
@@ -1756,6 +1757,27 @@ function drawRcSet(){
     $('#rcSaveCfg').onclick=function(){save(collect(),this)};
   }).catch(function(){var el=$('#rcpt');if(el)el.textContent='Not set up yet.'});
 }
+/* ---------- people using ArNote (only on Brian's own ArNote) ---------- */
+function drawPeople(list){
+  (list?Promise.resolve(list):call('api_users')).then(function(us){var el=$('#ppl');if(!el)return;
+    var ago=function(d){if(!d)return '<span class="muted">never</span>';var n=Math.round((new Date(today())-new Date(d))/864e5);return esc(d)+' <span class="muted">('+(n<=0?'today':n===1?'yesterday':n+' days ago')+')</span>'};
+    us.sort(function(a,b){return (a.status==='removed')-(b.status==='removed')||(a.name||a.email).localeCompare(b.name||b.email)});
+    el.innerHTML='<p style="margin:0 0 8px">Only people on this list can set up and use ArNote. Each copy checks in once a day and reports only the last day it was used and its version — never notes, tags or photos. Removing someone stops their ArNote within a day; their own notes and photos stay in their Drive.</p>'+
+      (us.length?'<div class="rcwrap"><table class="rct"><thead><tr><th>Person</th><th>Status</th><th>Last used</th><th>Last check-in</th><th>Version</th><th></th></tr></thead><tbody>'+
+        us.map(function(u){var off=u.status==='removed';return '<tr'+(off?' style="opacity:.55"':'')+'><td><b>'+esc(u.name||'—')+'</b><br><span class="muted mono" style="font-size:12px">'+esc(u.email)+'</span>'+(u.note?'<br><span class="muted" style="font-size:12px">'+esc(u.note)+'</span>':'')+'</td>'+
+          '<td>'+(off?'Removed':'Active')+'<br><span class="muted" style="font-size:12px">since '+esc(u.added||'')+'</span></td><td>'+ago(u.lastUsed)+'</td><td>'+ago(u.lastCheckin)+'</td><td>'+(u.build?esc(u.build)+(S.build&&+u.build<+S.build?' <span class="rcw" title="Behind your version '+S.build+'">⚠</span>':''):'<span class="muted">not set up yet</span>')+'</td>'+
+          '<td style="white-space:nowrap">'+(off?'<button class="btn small" data-pon="'+esc(u.email)+'">Restore</button>':'<button class="btn small" data-poff="'+esc(u.email)+'">Remove</button>')+(!u.lastCheckin||off?' <button class="btn small" data-pdel="'+esc(u.email)+'" title="Delete from the list (typos, tests)">✕</button>':'')+'</td></tr>'}).join('')+'</tbody></table></div>':'<p style="margin:4px 0">Nobody yet.</p>')+
+      '<div class="setrow" style="margin-top:8px;flex-wrap:wrap"><input class="field" id="pName" placeholder="Name" style="max-width:160px;margin:0"><input class="field" id="pMail" placeholder="their Google (Gmail) address" style="max-width:260px;margin:0" autocomplete="off"><button class="btn small primary" id="pAdd">Add person</button></div>'+
+      '<p style="margin:6px 0 0;font-size:12px">The setup link to send them comes with the setup template (next on the list).</p>';
+    var act=function(p){p.then(function(l){drawPeople(l)}).catch(function(e){toast(e.message)})};
+    $('#pAdd').onclick=function(){var m=$('#pMail').value.trim();if(!m){toast('Enter their email');return}act(call('api_userAdd',m,$('#pName').value.trim()))};
+    $('#pMail').onkeydown=function(e){if(e.key==='Enter')$('#pAdd').click()};
+    $$('#ppl [data-poff]').forEach(function(b){b.onclick=function(){if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Tap again to remove';return}act(call('api_userSet',b.dataset.poff,{status:'removed'}))}});
+    $$('#ppl [data-pon]').forEach(function(b){b.onclick=function(){act(call('api_userSet',b.dataset.pon,{status:'active'}))}});
+    $$('#ppl [data-pdel]').forEach(function(b){b.onclick=function(){if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Delete?';return}act(call('api_userDelete',b.dataset.pdel))}});
+  }).catch(function(e){var el=$('#ppl');if(el)el.textContent='Not available ('+e.message+').'});
+}
+function today(){var d=new Date();return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2)}
 /* ---------- backup settings ---------- */
 function drawBackupSet(){
   call('api_backups').then(function(b){var el=$('#bkset');if(!el)return;
@@ -2408,9 +2430,17 @@ function tryPair(c){
 function start(){
   document.body.classList.remove('unpaired');
   $('#main').innerHTML='<div class="loading">Loading notes…</div>';
-  Promise.all([load(),call('api_appInfo').then(function(i){DROP_URL=i.dropUrl||'';LINK_URL=i.linkUrl||'';if(i.user)S.user=i.user}).catch(function(){})]).then(function(){
+  Promise.all([load().catch(function(e){S.loadErr=e}),call('api_appInfo').then(function(i){DROP_URL=i.dropUrl||'';LINK_URL=i.linkUrl||'';if(i.user)S.user=i.user;S.lic=i.licence||null;S.build=i.build}).catch(function(){})]).then(function(){
+    if(S.lic&&!S.lic.ok){showEnded();return}
+    if(S.loadErr) throw S.loadErr;
     if(location.search.indexOf('share=1')>=0) receiveShare(); else go('home');
   });
+}
+/** This copy is no longer on Brian's list: say so plainly; everything is still in their Drive. */
+function showEnded(){
+  $('#main').innerHTML='<div class="pair"><h1>ArNote</h1><p style="font-size:16px"><b>ArNote access has ended for this account.</b></p>'+
+    '<p class="muted">Nothing has been deleted: your notes are Google Docs in the <b>ArNote</b> folder of your Google Drive, your photos are in <b>ArNote Photos</b>, and the index is the ArNote spreadsheet. You can open all of them in Google Drive any time.</p>'+
+    '<p class="muted">If you think this is a mistake, contact the person who invited you.</p><a class="btn" href="https://drive.google.com" target="_blank">Open Google Drive</a></div>';
 }
 /* ---------- things shared into ArNote from other apps (Android share sheet) ---------- */
 function receiveShare(){
