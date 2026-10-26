@@ -437,6 +437,10 @@ function doPost(e) {
       out = { ok: true, result: shareDispatch_(req.s, String(req.fn || ''), Array.isArray(req.a) ? req.a : []) };
       return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
     }
+    if (req.inv === 'get' || req.inv === 'accept') {   // the invite page (public; only answers a valid invite token)
+      out = { ok: true, result: isLicenceServer_() ? inviteReq_(req) : null };
+      return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+    }
     if (req.lic === 'code') {                      // a copy on the list fetching the released code
       out = { ok: true, result: isLicenceServer_() ? releaseFor_(req) : null };
       return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
@@ -478,11 +482,25 @@ function pairingLink_(serverUrl, key) {
 }
 
 /** Basic facts the app needs (no hard-coded IDs in the app, so other people can run their own server). */
-function api_appInfo() {
+function api_appInfo(dev) {
   var drop = null; try { drop = dropFolder_().getUrl(); } catch (e) {}
   var link = null; try { link = linkFolder_().getUrl(); } catch (e) {}
-  noteUsed_();
+  noteUsed_(); try { noteDevice_(dev); } catch (e) {}
   return { user: Session.getEffectiveUser().getEmail(), dropUrl: drop, linkUrl: link, version: 2, build: ARNOTE_BUILD, licence: licenceState_() };
+}
+
+/** Which kinds of device open this ArNote (e.g. "iPhone app", "Windows"), so Brian can see who has it on their phone.
+ * Only the kind of device and the day last seen; a new kind is reported to Brian's list straight away. */
+function noteDevice_(dev) {
+  dev = String(dev || '').replace(/[^A-Za-z ]/g, '').slice(0, 20); if (!dev) return;
+  var p = props_(), d = {}; try { d = JSON.parse(p.getProperty('devices') || '{}'); } catch (e) {}
+  var isNew = !d[dev], t = today_(); if (d[dev] === t) return;
+  d[dev] = t; p.setProperty('devices', JSON.stringify(d));
+  if (isNew && !isLicenceServer_()) { try { licenceCheck_(); } catch (e) {} }
+}
+function devicesText_() {
+  var d = {}; try { d = JSON.parse(props_().getProperty('devices') || '{}'); } catch (e) {}
+  return Object.keys(d).sort(function (a, b) { return d[b] < d[a] ? -1 : d[b] > d[a] ? 1 : 0; }).join(', ');
 }
 
 /* ---------------- People using ArNote (licence) ----------------
@@ -493,22 +511,28 @@ function api_appInfo() {
 var ARNOTE_BUILD = 58;
 var LICENCE_SCRIPT_ID = '1NmFRd6lH63u-JBeTJfg0IyMZtDJj6jxw8WNfbOdh_TSTuOpVZ5JJ2s4B';
 var LICENCE_URL = 'https://script.google.com/macros/s/AKfycbyFPAGYJE1bVycoBv8QamFeUHuBjbCAhogOM8mSU7vn20CVO_Ex1XJYfRy7f7lZES-_Kg/exec';
-var USER_COLS = ['email', 'name', 'status', 'plan', 'added', 'lastUsed', 'lastCheckin', 'build', 'install', 'note'];
+var USER_COLS = ['email', 'name', 'status', 'plan', 'added', 'lastUsed', 'lastCheckin', 'build', 'install', 'note', 'contact', 'invite', 'invited', 'accepted', 'devices'];
+var TEMPLATE_COPY_URL = 'https://docs.google.com/spreadsheets/d/1U4jJdCdPe7nZbzf2oSH7BCsAdAevRlnWYheZxxoFUTk/copy';
 function isLicenceServer_() { return ScriptApp.getScriptId() === LICENCE_SCRIPT_ID; }
 function today_() { return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'); }
 function noteUsed_() { var p = props_(), d = today_(); if (p.getProperty('lastUsed') !== d) p.setProperty('lastUsed', d); }
-function usersSheet_() { if (!isLicenceServer_()) throw new Error('Only the owner can manage people'); return ensureSheet_('Users', USER_COLS); }
+function usersSheet_() {
+  if (!isLicenceServer_()) throw new Error('Only the owner can manage people');
+  var sh = ensureSheet_('Users', USER_COLS);
+  if (sh.getLastColumn() < USER_COLS.length) sh.getRange(1, 1, 1, USER_COLS.length).setValues([USER_COLS]).setFontWeight('bold');
+  return sh;
+}
 function userRows_() {
   var sh = usersSheet_(), n = sh.getLastRow() - 1, tz = Session.getScriptTimeZone(); if (n < 1) return { sh: sh, rows: [] };
   var d = function (x) { return x instanceof Date ? Utilities.formatDate(x, tz, 'yyyy-MM-dd') : String(x || ''); };
   return { sh: sh, rows: sh.getRange(2, 1, n, USER_COLS.length).getValues().map(function (r, i) {
-    var o = { row: i + 2 }; USER_COLS.forEach(function (c, j) { o[c] = /^(added|lastUsed|lastCheckin)$/.test(c) ? d(r[j]) : String(r[j] === null ? '' : r[j]); }); o.email = o.email.toLowerCase(); return o; }) };
+    var o = { row: i + 2 }; USER_COLS.forEach(function (c, j) { o[c] = /^(added|lastUsed|lastCheckin|invited|accepted)$/.test(c) ? d(r[j]) : String(r[j] === null ? '' : r[j]); }); o.email = o.email.toLowerCase(); return o; }) };
 }
-function api_users() { return userRows_().rows.map(function (u) { delete u.row; delete u.install; return u; }); }
+function api_users() { return userRows_().rows.map(function (u) { delete u.row; delete u.install; u.invite = u.invite ? 1 : 0; return u; }); }
 function api_userAdd(email, name, note) {
   email = String(email || '').trim().toLowerCase(); if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('That isn\'t an email address');
   var t = userRows_(); if (t.rows.some(function (u) { return u.email === email; })) throw new Error(email + ' is already on the list');
-  t.sh.appendRow([email, String(name || '').trim().slice(0, 60), 'active', 'free', today_(), '', '', '', '', String(note || '').slice(0, 200)]);
+  t.sh.appendRow([email, String(name || '').trim().slice(0, 60), 'active', 'free', today_(), '', '', '', '', String(note || '').slice(0, 200), email, '', '', '', '']);
   return api_users();
 }
 /** ch: {status: 'active'|'removed', name, plan, note} */
@@ -527,6 +551,60 @@ function api_userDelete(email) {
   if (u) t.sh.deleteRow(u.row);
   return api_users();
 }
+/* ---------- Invites: Brian types an email and clicks Invite; they confirm their Google account on the invite page ---------- */
+function inviteToken_() { return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, Utilities.getUuid() + Date.now())).replace(/=+$/, '').slice(0, 32); }
+function api_userInvite(contact, name) {
+  contact = String(contact || '').trim().toLowerCase(); if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(contact)) throw new Error('That isn\'t an email address');
+  var t = userRows_(); if (t.rows.some(function (u) { return u.email === contact || u.contact === contact; })) throw new Error(contact + ' is already on the list (use Resend)');
+  var tok = inviteToken_(); name = String(name || '').trim().slice(0, 60);
+  t.sh.appendRow([contact, name, 'invited', 'free', today_(), '', '', '', '', '', contact, tok, today_(), '', '']);
+  inviteEmail_(contact, name, tok);
+  return api_users();
+}
+function api_userResend(email) {
+  email = String(email || '').toLowerCase(); var t = userRows_(), u = t.rows.filter(function (x) { return x.email === email; })[0];
+  if (!u) throw new Error('Not on the list');
+  var tok = u.invite || inviteToken_();
+  t.sh.getRange(u.row, 12, 1, 2).setValues([[tok, today_()]]);
+  inviteEmail_(u.contact || u.email, u.name, tok);
+  return api_users();
+}
+function inviteEmail_(to, name, tok) {
+  var link = APP_URL + '#invite=' + tok, me = Session.getEffectiveUser().getEmail();
+  var first = String(name || '').split(/\s+/)[0];
+  var plain = 'Hi' + (first ? ' ' + first : '') + ',\n\n' +
+    'You\'re invited to ArNote, the notes-and-photos app I\'ve been building.\n\n' +
+    'What it does:\n' +
+    '- Notes, photos, receipts, business cards and documents in one place, organized by tags (Who / What / When / Where to start).\n' +
+    '- Everything lives in YOUR own Google Drive. I can\'t see your notes, and nothing is stored anywhere else.\n' +
+    '- Photos: one gallery you can drill into by tag or by place on a map.\n' +
+    '- Receipts: tag by job and expense category, mark billed / not billed, print a clean report.\n' +
+    '- Email in: forward any email (receipts, invoices, anything) to your ArNote address and it lands in your Inbox to tag.\n' +
+    '- Daily backup, and new features show up on their own.\n\n' +
+    'Start here (about 10 minutes, best on a computer; you\'ll need a Google account, a free Gmail is fine):\n' + link + '\n\n' +
+    'Then put it on your phone too. That\'s where it shines: snap a receipt or a business card, or send photos from your gallery or a text, and it\'s filed in seconds. The same link shows the phone steps.\n\n' +
+    'Any questions, just reply.\n';
+  var esc = function (x) { return String(x).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+  var html = esc(plain).replace(esc(link), '<a href="' + esc(link) + '" style="display:inline-block;background:#2f6f4f;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:bold">Set up ArNote</a>').replace(/\n/g, '<br>');
+  GmailApp.sendEmail(to, 'You\'re invited to ArNote', plain, { htmlBody: '<div style="font:15px/1.5 sans-serif;max-width:560px">' + html + '</div>', replyTo: me });
+}
+/** Public (no key): the invite page reads and accepts an invite by its token. Says nothing unless the token matches. */
+function inviteReq_(req) {
+  var tok = String(req.t || ''); if (!/^[A-Za-z0-9_-]{20,}$/.test(tok)) return null;
+  var lock = LockService.getScriptLock(); try { lock.waitLock(10000); } catch (e) {}
+  try {
+    var t = userRows_(), u = t.rows.filter(function (x) { return x.invite === tok; })[0];
+    if (!u || u.status === 'removed') return null;
+    if (req.inv === 'accept' && !u.accepted) {
+      var acct = String(req.account || '').trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(acct)) throw new Error('That isn\'t an email address');
+      if (t.rows.some(function (x) { return x.row !== u.row && x.email === acct; })) throw new Error(acct + ' is already in use for ArNote');
+      t.sh.getRange(u.row, 1).setValue(acct); t.sh.getRange(u.row, 3).setValue('active'); t.sh.getRange(u.row, 14).setValue(today_());
+      u.email = acct; u.accepted = today_();
+    }
+    return { name: u.name, contact: u.contact || u.email, account: u.email, accepted: !!u.accepted, copyUrl: TEMPLATE_COPY_URL, from: Session.getEffectiveUser().getEmail() };
+  } finally { try { lock.releaseLock(); } catch (e) {} }
+}
 function licCheck_(req) {
   var email = String(req.email || '').trim().toLowerCase(); if (!email) return { ok: false, status: 'unknown' };
   var lock = LockService.getScriptLock(); try { lock.waitLock(10000); } catch (e) {}
@@ -535,6 +613,10 @@ function licCheck_(req) {
     if (!u) return { ok: false, status: 'unknown' };
     var used = /^\d{4}-\d\d-\d\d$/.test(String(req.lastUsed || '')) ? String(req.lastUsed) : '';
     t.sh.getRange(u.row, 6, 1, 4).setValues([[used && used > u.lastUsed ? used : u.lastUsed, today_(), String(+req.build || ''), String(req.install || '').slice(0, 60)]]);
+    if (u.status === 'invited') {                 // set up straight from the invite without the form: that counts as accepting
+      u.status = 'active'; t.sh.getRange(u.row, 3).setValue('active'); if (!u.accepted) t.sh.getRange(u.row, 14).setValue(today_());
+    }
+    if (typeof req.devices === 'string' && req.devices) t.sh.getRange(u.row, 15).setValue(req.devices.slice(0, 120));
     return { ok: u.status === 'active', status: u.status, plan: u.plan, release: +props_().getProperty('releaseN') || 0 };
   } finally { try { lock.releaseLock(); } catch (e) {} }
 }
@@ -642,7 +724,7 @@ function licenceCheck_() {
   var res = null;
   try {
     var r = UrlFetchApp.fetch(LICENCE_URL, { method: 'post', contentType: 'text/plain', muteHttpExceptions: true,
-      payload: JSON.stringify({ lic: 'check', email: Session.getEffectiveUser().getEmail(), install: inst, build: +p.getProperty('releaseInstalled') || 0, lastUsed: p.getProperty('lastUsed') || '' }) });
+      payload: JSON.stringify({ lic: 'check', email: Session.getEffectiveUser().getEmail(), install: inst, build: +p.getProperty('releaseInstalled') || 0, lastUsed: p.getProperty('lastUsed') || '', devices: devicesText_() }) });
     res = (JSON.parse(r.getContentText()) || {}).result;
   } catch (e) { Logger.log('Licence check: ' + e); }
   if (res && typeof res.ok === 'boolean') { res.at = new Date().toISOString(); p.setProperty('licence', JSON.stringify(res)); return res; }

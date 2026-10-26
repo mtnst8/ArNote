@@ -1762,18 +1762,21 @@ function drawPeople(list){
   (list?Promise.resolve(list):call('api_users')).then(function(us){var el=$('#ppl');if(!el)return;
     var ago=function(d){if(!d)return '<span class="muted">never</span>';var n=Math.round((new Date(today())-new Date(d))/864e5);return esc(d)+' <span class="muted">('+(n<=0?'today':n===1?'yesterday':n+' days ago')+')</span>'};
     us.sort(function(a,b){return (a.status==='removed')-(b.status==='removed')||(a.name||a.email).localeCompare(b.name||b.email)});
-    el.innerHTML='<div id="relBox" class="setrow" style="margin:0 0 10px"></div><p style="margin:0 0 8px">Only people on this list can set up and use ArNote. Each copy checks in once a day and reports only the last day it was used and its version — never notes, tags or photos. Removing someone stops their ArNote within a day; their own notes and photos stay in their Drive.</p>'+
+    el.innerHTML='<div id="relBox" class="setrow" style="margin:0 0 10px"></div><p style="margin:0 0 8px">Only people on this list can set up and use ArNote. Each copy checks in once a day and reports only the last day it was used, its version and the kinds of device it\'s opened on (e.g. iPhone, Windows) — never notes, tags or photos. Removing someone stops their ArNote within a day; their own notes and photos stay in their Drive.</p>'+
       (us.length?'<div class="rcwrap"><table class="rct"><thead><tr><th>Person</th><th>Status</th><th>Last used</th><th>Last check-in</th><th>Version</th><th></th></tr></thead><tbody>'+
-        us.map(function(u){var off=u.status==='removed';return '<tr'+(off?' style="opacity:.55"':'')+'><td><b>'+esc(u.name||'—')+'</b><br><span class="muted mono" style="font-size:12px">'+esc(u.email)+'</span>'+(u.note?'<br><span class="muted" style="font-size:12px">'+esc(u.note)+'</span>':'')+'</td>'+
-          '<td>'+(off?'Removed':'Active')+'<br><span class="muted" style="font-size:12px">since '+esc(u.added||'')+'</span></td><td>'+ago(u.lastUsed)+'</td><td>'+ago(u.lastCheckin)+'</td><td>'+(u.build?esc(u.build)+(S.build&&+u.build<+S.build?' <span class="rcw" title="Behind your version '+S.build+'">⚠</span>':''):'<span class="muted">not set up yet</span>')+'</td>'+
-          '<td style="white-space:nowrap">'+(off?'<button class="btn small" data-pon="'+esc(u.email)+'">Restore</button>':'<button class="btn small" data-poff="'+esc(u.email)+'">Remove</button>')+(!u.lastCheckin||off?' <button class="btn small" data-pdel="'+esc(u.email)+'" title="Delete from the list (typos, tests)">✕</button>':'')+'</td></tr>'}).join('')+'</tbody></table></div>':'<p style="margin:4px 0">Nobody yet.</p>')+
-      '<div class="setrow" style="margin-top:8px;flex-wrap:wrap"><input class="field" id="pName" placeholder="Name" style="max-width:160px;margin:0"><input class="field" id="pMail" placeholder="their Google (Gmail) address" style="max-width:260px;margin:0" autocomplete="off"><button class="btn small primary" id="pAdd">Add person</button></div>'+
-      '<p style="margin:6px 0 0;font-size:12px">The setup link to send them comes with the setup template (next on the list).</p>';
+        us.map(function(u){var off=u.status==='removed',devs=String(u.devices||''),onPhone=/iPhone|Android/.test(devs);
+          var st=off?'Removed':u.status==='invited'?'Invited <span class="muted" style="font-size:12px">'+esc(u.invited||'')+'</span>':!u.lastCheckin?'Accepted <span class="muted" style="font-size:12px">'+esc(u.accepted||'')+'</span>':onPhone?'On phone ✓':'Set up';
+          return '<tr'+(off?' style="opacity:.55"':'')+'><td><b>'+esc(u.name||'—')+'</b><br><span class="muted mono" style="font-size:12px" title="Google account">'+esc(u.email)+'</span>'+(u.contact&&u.contact!==u.email?'<br><span class="muted" style="font-size:12px">email: '+esc(u.contact)+'</span>':'')+(u.note?'<br><span class="muted" style="font-size:12px">'+esc(u.note)+'</span>':'')+'</td>'+
+          '<td>'+st+(devs?'<br><span class="muted" style="font-size:12px">'+esc(devs)+'</span>':'')+'</td><td>'+ago(u.lastUsed)+'</td><td>'+ago(u.lastCheckin)+'</td><td>'+(u.build?esc(u.build)+(S.build&&+u.build<+S.build?' <span class="rcw" title="Behind your version '+S.build+'">⚠</span>':''):'<span class="muted">not set up yet</span>')+'</td>'+
+          '<td style="white-space:nowrap">'+(!off&&!u.lastCheckin?'<button class="btn small" data-pres="'+esc(u.email)+'">Resend</button> ':'')+(off?'<button class="btn small" data-pon="'+esc(u.email)+'">Restore</button>':'<button class="btn small" data-poff="'+esc(u.email)+'">Remove</button>')+(!u.lastCheckin||off?' <button class="btn small" data-pdel="'+esc(u.email)+'" title="Delete from the list (typos, tests)">✕</button>':'')+'</td></tr>'}).join('')+'</tbody></table></div>':'<p style="margin:4px 0">Nobody yet.</p>')+
+      '<div class="setrow" style="margin-top:8px;flex-wrap:wrap"><input class="field" id="pName" placeholder="Name" style="max-width:160px;margin:0"><input class="field" id="pMail" placeholder="their email" style="max-width:260px;margin:0" autocomplete="off"><button class="btn small primary" id="pAdd">Invite</button></div>'+
+      '<p style="margin:6px 0 0;font-size:12px">Invite emails them from your Gmail with a personal link. They confirm the Google account they\'ll use (it can differ from this email), pick their phone, and get step-by-step setup. Status goes Invited → Accepted → Set up → On phone.</p>';
     drawRelease();
     var act=function(p){p.then(function(l){drawPeople(l)}).catch(function(e){toast(e.message)})};
-    $('#pAdd').onclick=function(){var m=$('#pMail').value.trim();if(!m){toast('Enter their email');return}act(call('api_userAdd',m,$('#pName').value.trim()))};
+    $('#pAdd').onclick=function(){var m=$('#pMail').value.trim();if(!m){toast('Enter their email');return}var b=this;b.disabled=true;b.textContent='Sending…';act(call('api_userInvite',m,$('#pName').value.trim()).then(function(l){toast('Invite sent to '+m);return l}).finally(function(){b.disabled=false;b.textContent='Invite'}))};
     $('#pMail').onkeydown=function(e){if(e.key==='Enter')$('#pAdd').click()};
     $$('#ppl [data-poff]').forEach(function(b){b.onclick=function(){if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Tap again to remove';return}act(call('api_userSet',b.dataset.poff,{status:'removed'}))}});
+    $$('#ppl [data-pres]').forEach(function(b){b.onclick=function(){b.disabled=true;act(call('api_userResend',b.dataset.pres).then(function(l){toast('Invite sent again');return l}))}});
     $$('#ppl [data-pon]').forEach(function(b){b.onclick=function(){act(call('api_userSet',b.dataset.pon,{status:'active'}))}});
     $$('#ppl [data-pdel]').forEach(function(b){b.onclick=function(){if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Delete?';return}act(call('api_userDelete',b.dataset.pdel))}});
   }).catch(function(e){var el=$('#ppl');if(el)el.textContent='Not available ('+e.message+').'});
@@ -2450,7 +2453,7 @@ function tryPair(c){
 function start(){
   document.body.classList.remove('unpaired');
   $('#main').innerHTML='<div class="loading">Loading notes…</div>';
-  Promise.all([load().catch(function(e){S.loadErr=e}),call('api_appInfo').then(function(i){DROP_URL=i.dropUrl||'';LINK_URL=i.linkUrl||'';if(i.user)S.user=i.user;S.lic=i.licence||null;S.build=i.build}).catch(function(){})]).then(function(){
+  Promise.all([load().catch(function(e){S.loadErr=e}),call('api_appInfo',devLabel()).then(function(i){DROP_URL=i.dropUrl||'';LINK_URL=i.linkUrl||'';if(i.user)S.user=i.user;S.lic=i.licence||null;S.build=i.build}).catch(function(){})]).then(function(){
     if(S.lic&&!S.lic.ok){showEnded();return}
     if(S.loadErr) throw S.loadErr;
     if(location.search.indexOf('share=1')>=0) receiveShare(); else go('home');
@@ -2461,6 +2464,48 @@ function showEnded(){
   $('#main').innerHTML='<div class="pair"><h1>ArNote</h1><p style="font-size:16px"><b>ArNote access has ended for this account.</b></p>'+
     '<p class="muted">Nothing has been deleted: your notes are Google Docs in the <b>ArNote</b> folder of your Google Drive, your photos are in <b>ArNote Photos</b>, and the index is the ArNote spreadsheet. You can open all of them in Google Drive any time.</p>'+
     '<p class="muted">If you think this is a mistake, contact the person who invited you.</p><a class="btn" href="https://drive.google.com" target="_blank">Open Google Drive</a></div>';
+}
+/** Kind of device, for Brian's People list (nothing else about the device). */
+function devLabel(){var u=navigator.userAgent||'',k=/iPhone/.test(u)?'iPhone':/iPad/.test(u)||(/Macintosh/.test(u)&&navigator.maxTouchPoints>1)?'iPad':/Android/.test(u)?'Android':/CrOS/.test(u)?'ChromeOS':/Windows/.test(u)?'Windows':/Macintosh/.test(u)?'Mac':/Linux/.test(u)?'Linux':'Other';
+  var app=false;try{app=navigator.standalone||matchMedia('(display-mode: standalone)').matches}catch(e){}return k+(app?' app':'')}
+/* ---------- invite page: someone Brian invited confirms their Google account and gets setup steps for their phone ---------- */
+var OWNER_API='https://script.google.com/macros/s/AKfycbyFPAGYJE1bVycoBv8QamFeUHuBjbCAhogOM8mSU7vn20CVO_Ex1XJYfRy7f7lZES-_Kg/exec';
+function invCall(body){return fetch(OWNER_API,{method:'POST',body:JSON.stringify(body)}).then(function(r){return r.text()}).then(function(t){var j;try{j=JSON.parse(t)}catch(e){throw new Error('ArNote didn\'t answer; try again in a minute')}if(!j.ok)throw new Error(j.error||'Something went wrong');return j.result})}
+function showInvite(tok){
+  document.body.classList.add('unpaired');
+  var d=devLabel(),phone=/^iPhone|^iPad/.test(d)?'ios':/^Android/.test(d)?'android':'';
+  var box=function(h){$('#main').innerHTML='<div class="pair invite" style="max-width:640px"><h1>ArNote</h1><span class="tagline">Tag — you\'re it.</span>'+h+'</div>'};
+  box('<p class="muted">Opening your invite…</p>');
+  var draw=function(v){
+    if(!v){box('<p style="font-size:16px"><b>This invite link isn\'t valid anymore.</b></p><p class="muted">Ask the person who invited you to send a new one.</p>');return}
+    var ph='<div class="setrow" style="gap:6px;flex-wrap:wrap;margin:4px 0 0">'+[['ios','iPhone'],['android','Android (Pixel, Samsung…)'],['none','No smartphone']].map(function(o){return '<button class="btn small'+(phone===o[0]?' primary':'')+'" data-ph="'+o[0]+'">'+o[1]+'</button>'}).join('')+'</div>';
+    var hello='<p style="font-size:16px;margin:10px 0 4px"><b>Welcome'+(v.name?', '+esc(v.name.split(/\s+/)[0]):'')+'!</b> '+esc(v.from)+' invited you to ArNote: notes, photos and receipts, organized by tags and kept in your own Google Drive.</p>';
+    if(!v.accepted){
+      box(hello+'<label>1. Which Google account will you use for ArNote?</label><input class="field" id="ivAcct" value="'+esc(v.contact)+'" autocomplete="email">'+
+        '<p class="muted" style="font-size:13px;margin:4px 0 10px">Everything is kept in this account\'s Google Drive. A free Gmail account is fine. It must be the account you\'ll be signed in to when you set up.</p>'+
+        '<label>2. What phone do you have?</label>'+ph+'<div class="err" id="ivErr"></div><button class="btn primary" id="ivGo" style="margin-top:12px">Continue</button>');
+      $$('#main [data-ph]').forEach(function(b){b.onclick=function(){phone=b.dataset.ph;$$('#main [data-ph]').forEach(function(x){x.classList.toggle('primary',x===b)})}});
+      $('#ivGo').onclick=function(){var a=$('#ivAcct').value.trim();if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a)){$('#ivErr').textContent='Enter your Google account email';return}
+        if(!phone){$('#ivErr').textContent='Pick your phone (or No smartphone)';return}
+        this.disabled=true;$('#ivErr').textContent='';invCall({inv:'accept',t:tok,account:a}).then(draw).catch(function(e){$('#ivErr').textContent=e.message;$('#ivGo').disabled=false})};
+      return}
+    var A='<b>'+esc(v.account)+'</b>';
+    var steps='<h3 style="margin:16px 0 4px">On a computer (about 10 minutes)</h3><ol style="padding-left:20px;margin:0;line-height:1.55">'+
+      '<li>Be signed in to Google as '+A+'. (If you use several Google accounts, sign out of the others or use a private window.) Then open <a href="'+esc(v.copyUrl)+'" target="_blank"><b>Make my copy of ArNote</b></a> and click <b>Make a copy</b>.</li>'+
+      '<li>In your copy, wait a few seconds for the <b>ArNote</b> menu at the top (refresh the page if it doesn\'t appear), then choose <b>ArNote → Set up ArNote</b>.</li>'+
+      '<li>Google asks for permission: choose '+A+'. If you see <i>Google hasn\'t verified this app</i>, click <b>Advanced → Go to ArNote</b>, then <b>Allow</b>. (It\'s "unverified" only because it\'s a private app, not one from an app store.)</li>'+
+      '<li>When it says ArNote is set up: <b>Extensions → Apps Script</b>, then <b>Deploy</b> (blue button, top right) <b>→ New deployment →</b> the gear ⚙ <b>→ Web app</b>. Set <b>Execute as: Me</b> and <b>Who has access: Anyone</b>, click <b>Deploy</b>, allow the permissions, then click <b>Copy</b> under <i>Web app URL</i>. ("Anyone" only lets your phone reach your ArNote; it still needs your private pairing link.)</li>'+
+      '<li>Back in the spreadsheet: <b>ArNote → Open the app</b>, paste the address, and click <b>Get my pairing link</b>. Click <b>Open ArNote here</b> to start, and <b>email the pairing link to yourself</b> for your phone. Keep it private: it\'s the key to your notes.</li></ol>';
+    var ph2=phone==='ios'?'<p style="margin:0 0 6px">Open the pairing link from your email in <b>Safari</b> (or Chrome), tap <b>Share</b> (the square with the arrow) <b>→ Add to Home Screen</b>. ArNote is now an app on your phone.</p>'+
+        '<p style="margin:0">To send photos from your gallery or a text: iPhone doesn\'t let web apps appear in the Share menu, so tap <b>Share → Mail</b> and send them to your ArNote email address (shown in ArNote under <b>Settings → Email in</b>). Or open ArNote and add photos from there.</p>'
+      :phone==='android'?'<p style="margin:0 0 6px">Open the pairing link from your email in <b>Chrome</b>, tap the <b>⋮</b> menu <b>→ Install app</b> (or <b>Add to Home screen</b>). ArNote is now an app on your phone.</p>'+
+        '<p style="margin:0">Then in your gallery or a text, tap <b>Share → ArNote</b> to send photos straight in.</p>'
+      :'<p style="margin:0">Use the pairing link on any computer or tablet. If you get a smartphone later, come back to this page.</p>';
+    box(hello+'<p style="margin:6px 0 0">Your ArNote account: '+A+'</p>'+steps+'<h3 style="margin:16px 0 4px">On your phone (highly recommended)</h3>'+ph+'<div id="ivPh" style="margin-top:8px">'+ph2+'</div>'+
+      '<p class="muted" style="font-size:13px;margin-top:16px">Keep this email: the same link brings you back to these steps. Questions? Reply to the invite email.</p>'+(CFG?'<a class="btn" href="./">Go to my ArNote</a>':''));
+    $$('#main [data-ph]').forEach(function(b){b.onclick=function(){phone=b.dataset.ph;draw(v)}});
+  };
+  invCall({inv:'get',t:tok}).then(draw).catch(function(e){box('<p class="err">'+esc(e.message)+'</p>')});
 }
 /* ---------- things shared into ArNote from other apps (Android share sheet) ---------- */
 function receiveShare(){
@@ -2484,6 +2529,7 @@ function receiveShare(){
   })}).catch(function(){go('inbox')});
 }
 (function boot(){
+  var inv=location.hash.match(/#invite=([A-Za-z0-9_-]{20,})/); if(inv){showInvite(inv[1]);return}
   var sh=parseShare(location.hash);
   if(sh){history.replaceState(null,'',location.pathname);
     if(!CFG) try{localStorage.setItem('arnote.share',JSON.stringify(sh))}catch(e){}
