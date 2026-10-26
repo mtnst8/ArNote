@@ -45,6 +45,7 @@ h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--mute)
 .rcn.l2{margin-left:14px;font-size:13px}.ub2{display:block;font-size:11px;color:var(--warn)}
 .rccr{margin:0 0 8px;font-size:15px}.rccr button{background:none;border:none;color:var(--acc);font:inherit;cursor:pointer;padding:0}
 .rcselbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 10px;margin:0 0 8px;border-radius:10px;background:var(--card);border:1px solid var(--acc)}
+.rcinv{font-size:10px;text-transform:uppercase;letter-spacing:.4px;border:1px solid var(--line);border-radius:6px;padding:1px 5px;opacity:.75;white-space:nowrap}
 .rct td.ck,.rct th.ck{width:28px;padding-right:0}.rct .bl{font-size:12px;color:var(--acc);white-space:nowrap}
 .rcwrap{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:12px}
 .rct{border-collapse:collapse;width:100%;font-size:14px}
@@ -889,7 +890,7 @@ function renderPv(){
   el.innerHTML='<input id="pvTitle" class="pvtitle" value="'+esc(n.title)+'" title="Click to rename" spellcheck="false">'+
     '<div class="muted" style="font-size:12px">Created '+fmt(n.created)+(n.att?' · 📎'+n.att:'')+'</div>'+
     '<div class="bar" id="tagbar"></div>'+
-    '<div class="bar"><button class="btn primary" id="pvFile">File → Cabinet</button><button class="btn" id="pvOpen">Open / edit</button>'+(n.tags.indexOf('Receipt')>=0?'<button class="btn" id="pvRc">🧾 Receipt details</button>':'')+'<button class="btn danger" id="pvDel">Delete</button>'+
+    '<div class="bar"><button class="btn primary" id="pvFile">File → Cabinet</button><button class="btn" id="pvOpen">Open / edit</button>'+(n.tags.indexOf('Receipt')>=0?'<button class="btn" id="pvRc">🧾 Receipt details</button>':/mail\.google\.com/.test(n.sourceUrl||'')?'<button class="btn" id="pvMk" title="Read this email as a receipt or invoice">🧾 It\'s a receipt</button>':'')+'<button class="btn danger" id="pvDel">Delete</button>'+
     '<span class="kbd">Keys: ↑ ↓ move · T add tag · F file · Enter open</span></div><div id="pvloc"></div>'+
     readerHtml();
   renderTags(n);
@@ -904,6 +905,7 @@ function renderPv(){
   $('#pvFile').onclick=function(){fileNote(n.id)};
   $('#pvOpen').onclick=function(){go('note',n.id)};
   if($('#pvRc')) $('#pvRc').onclick=function(){S.rcData=null;rcDetails(n.id)};
+  if($('#pvMk')) $('#pvMk').onclick=function(){markReceipt(n.id,this)};
   $('#pvDel').onclick=function(){var b=this;
     if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Tap again to delete';setTimeout(function(){if(b.isConnected){b.textContent='Delete';delete b.dataset.arm}},3000);return}
     trashLater([n.id],n.link?'Link removed (the file is untouched)':'Note deleted'); refreshInboxCount(); refreshSplit();};
@@ -1358,7 +1360,7 @@ function viewNote(id,keep){
       (isTriage?'<button class="btn" id="skip">Skip</button>':'')+
       (n.link?'<a class="btn" target="_blank" id="odocs" href="'+linkUrl(n)+'">Open in Drive ↗</a>':
         '<a class="btn" target="_blank" id="odocs" href="'+docUrl(n.docId,true)+'">Edit in Google Docs ↗</a><button class="btn" id="ehere">Edit here</button>'+
-        (n.sourceUrl?'<a class="btn" target="_blank" href="'+esc(n.sourceUrl)+'">'+(/mail\.google\.com/.test(n.sourceUrl)?'Open in Gmail':'Source')+'</a>':'')+(n.tags.indexOf('Receipt')>=0?'<button class="btn" onclick="S.rcData=null;rcDetails(\''+n.id+'\')">🧾 Receipt details</button>':''))+
+        (n.sourceUrl?'<a class="btn" target="_blank" href="'+esc(n.sourceUrl)+'">'+(/mail\.google\.com/.test(n.sourceUrl)?'Open in Gmail':'Source')+'</a>':'')+(n.tags.indexOf('Receipt')>=0?'<button class="btn" onclick="S.rcData=null;rcDetails(\''+n.id+'\')">🧾 Receipt details</button>':/mail\.google\.com/.test(n.sourceUrl||'')?'<button class="btn" onclick="markReceipt(\''+n.id+'\',this)">🧾 It\'s a receipt</button>':''))+
       '<button class="btn" id="nprint">🖨 Print</button>'+
       '<button class="btn danger" id="del">'+(n.link?'Remove link':'Delete')+'</button></div>'+
     '<div id="nloc"></div><div class="atts" id="atts"></div>'+
@@ -1543,7 +1545,7 @@ function rcDraw(){
   // the table
   var ncol=5+cols.length;
   var row=function(r){var warn=r.check?'<span class="rcw" title="Vendor, date or total missing">⚠</span>':'';
-    return '<tr data-n="'+esc(r.noteId)+'"><td class="ck"><input type="checkbox" class="rck"'+(S.rcSel[r.noteId]?' checked':'')+'></td><td>'+esc(r.date||'—')+'</td><td>'+warn+esc(r.vendor||'(no vendor)')+'</td>'+
+    return '<tr data-n="'+esc(r.noteId)+'"><td class="ck"><input type="checkbox" class="rck"'+(S.rcSel[r.noteId]?' checked':'')+'></td><td>'+esc(r.date||'—')+'</td><td>'+warn+esc(r.vendor||'(no vendor)')+(r.kind==='invoice'?' <span class="rcinv">Invoice</span>':'')+'</td>'+
       cols.map(function(c,i){return '<td>'+esc(r.cols[i].join(', '))+(i===0&&r.cols[0].length>1?' <span class="rcw" title="Tagged with more than one">⚠ '+r.cols[0].length+'</span>':'')+'</td>'}).join('')+
       '<td>'+esc(r.paid)+'</td><td class="bl">'+(r.billed?'✓ '+esc(r.billed):'')+'</td><td class="n">'+money(r.tax)+'</td><td class="n">'+money(r.total)+'</td></tr>'};
   var body='';
@@ -1603,6 +1605,12 @@ function rcDraw(){
     var imgs=[].slice.call(w.document.images),left=imgs.length,go2=function(){if(go2.done)return;go2.done=1;setTimeout(function(){w.print()},300)};
     if(!left)go2();imgs.forEach(function(im){if(im.complete){if(!--left)go2()}else im.onload=im.onerror=function(){if(!--left)go2()}});setTimeout(go2,20000)};
 }
+/** An email note that wasn't recognised: read it as a receipt anyway, then open the Receipt window to check it. */
+function markReceipt(id,btn){if(btn){btn.disabled=true;btn.textContent='Reading…'}
+  call('api_mailReceiptFor',[id],true).then(function(r){var x=r[0]||{};if(x.error)throw new Error(x.error);
+    var n=S.byId[id];if(n&&n.tags.indexOf('Receipt')<0)n.tags.push('Receipt');
+    toast(x.fields&&x.fields.total!==null?'Receipt — '+(x.fields.vendor||'')+' '+money(x.fields.total):'Marked as a receipt — add the amount');
+    S.rcData=null;rerender();rcDetails(id)}).catch(function(e){toast(e.message);if(btn){btn.disabled=false;btn.textContent='🧾 It\'s a receipt'}})}
 /** Left panel: drill down by the report columns (e.g. Job › Category), with counts, totals and what's not billed yet. */
 function rcNav(d,path,rg,q){
   var cols=d.cols, el=$('#rcNav'); if(!el) return;

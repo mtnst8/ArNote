@@ -736,6 +736,8 @@ function noteFromMail_(m, th) {
     atts.forEach(function (a) { var f = attFolder.createFile(a.copyBlob().setName(a.getName() || 'attachment')); files.push(f); appendFileToBody_(b, f); });
     doc.saveAndClose();
   }
+  var rc = null; try { rc = mailReceipt_(m, files, docId); } catch (e) { Logger.log('Mail receipt: ' + e); }
+  if (rc && st.tags.indexOf('Receipt') < 0) st.tags.push('Receipt');
   if (st.tags.length) ensureTags_(st.tags);
   var now = new Date(), id = Utilities.getUuid();
   var n = { id: id, title: st.title, notebook: 'Inbox', tags: st.tags.join(TAG_SEP), created: now, updated: now, docId: docId, starred: false,
@@ -743,7 +745,100 @@ function noteFromMail_(m, th) {
   ss_().getSheetByName('Notes').appendRow(noteToRow_(n));
   var attSh = ss_().getSheetByName('Attachments');
   files.forEach(function (f) { attSh.appendRow([id, f.getId(), f.getName(), f.getMimeType(), f.getSize(), '']); });
-  return { id: id, title: st.title };
+  if (rc) receiptSheet_().appendRow(mailReceiptRow_(rc, id));
+  return { id: id, title: st.title, receipt: !!rc };
+}
+
+/* ---------------- Emailed receipts and invoices ----------------
+ * A forwarded (or labelled) email that reads as a receipt/invoice gets the Receipt tag and a row in Receipts.
+ * Text comes from the email body, then from an attached PDF (Drive reads it, scanned PDFs too).
+ * Picture for reports: the PDF if there is one, otherwise the email note itself. */
+function fwdHeader_(plain) {
+  var i = plain.lastIndexOf('Forwarded message'); if (i < 0) return null;
+  var blk = plain.slice(i, i + 2000), from = (blk.match(/\nFrom:\s*(.+)/) || [])[1] || '', date = (blk.match(/\nDate:\s*(.+)/) || [])[1] || '';
+  var em = (from.match(/<([^>]+)>/) || from.match(/([\w.+-]+@[\w.-]+)/) || [])[1] || '';
+  var name = from.replace(/<[^>]*>/g, '').replace(/["']/g, '').trim(); if (name.indexOf('@') >= 0) name = '';
+  var d = date ? new Date(date.replace(/\s+at\s+/, ' ')) : null; if (d && isNaN(d.getTime())) d = null;
+  var to = blk.search(/\nTo:[^\n]*\n/), start = to >= 0 ? i + to + blk.slice(to + 1).indexOf('\n') + 2 : i + 200;
+  return { name: name, email: em.toLowerCase(), date: d, start: start };
+}
+function pdfText_(fileId) {
+  var hdr = { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() };
+  var cp = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '/copy?ocrLanguage=en&fields=id', { method: 'post', contentType: 'application/json',
+    payload: JSON.stringify({ name: 'ArNote read (temporary)', mimeType: 'application/vnd.google-apps.document' }), headers: hdr, muteHttpExceptions: true });
+  if (cp.getResponseCode() !== 200) return '';
+  var id = JSON.parse(cp.getContentText()).id;
+  try {
+    var t = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + id + '/export?mimeType=text/plain', { headers: hdr, muteHttpExceptions: true });
+    return t.getResponseCode() === 200 ? t.getContentText('UTF-8').replace(/^\uFEFF/, '') : '';
+  } finally { UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + id, { method: 'delete', headers: hdr, muteHttpExceptions: true }); }
+}
+function mailVendor_(fh, subj, fromHdr) {
+  var generic = /^(no-?reply|noreply|do not reply|info|billing|accounting|accounts?( payable| receivable)?|sales|support|orders?|customer ?service|notifications?|receipts?|invoices?|service|team|hello|admin|office)$/i;
+  var name = fh ? fh.name : String(fromHdr || '').replace(/<[^>]*>/g, '').replace(/["']/g, '').trim();
+  if (name.indexOf('@') >= 0) name = '';
+  if (name && !generic.test(name)) return name.slice(0, 40);
+  var m = subj.match(/\b(?:receipt|invoice|order|payment)s? from (.+?)(?:\s*[#(\[].*)?$/i);
+  if (m) return m[1].replace(/[.\s]+$/, '').slice(0, 40);
+  m = subj.match(/^(?:your\s+)?(.+?)\s+(?:invoice|receipt|order confirmation|statement|bill)\b/i);
+  if (m && !/^(your|thank|new|the|an?|order|payment)\b/i.test(m[1]) && m[1].split(' ').length <= 5) return m[1].slice(0, 40);
+  var em = fh ? fh.email : senderEmail_(fromHdr), dom = (em.split('@')[1] || '').split('.'), stem = dom.length > 1 ? dom[dom.length - 2] : dom[0] || '';
+  return stem ? stem.charAt(0).toUpperCase() + stem.slice(1) : '';
+}
+function mailReceipt_(m, files, docId) {
+  var subj = String(m.getSubject() || '').replace(/^\s*((fwd?|fw|re)\s*:\s*)+/i, '').trim(), plain = String(m.getPlainBody() || ''), fh = fwdHeader_(plain);
+  var body = fh ? plain.slice(fh.start) : plain, sig = body.lastIndexOf('\n--');
+  if (sig >= 0 && body.length - sig < 600) body = body.slice(0, sig);                      // your own signature
+  var pdfs = (files || []).filter(function (f) { return /pdf/i.test(f.getMimeType()) || /\.pdf$/i.test(f.getName()); });
+  var hint = /\b(receipt|invoice|inv\b|order|purchase|payment|paid|bill|statement)/i.test(subj + ' ' + pdfs.map(function (f) { return f.getName(); }).join(' '));
+  var r = classifyText_(body), text = body, pdfT = '';
+  if ((r.kind !== 'receipt' || r.fields.total === null) && pdfs.length) {
+    pdfT = pdfText_(pdfs[0].getId());
+    var r2 = classifyText_(pdfT);
+    if (r2.kind === 'receipt' && r2.fields.total !== null) { r = r2; text = pdfT; }
+  }
+  if (r.kind !== 'receipt') {
+    if (!hint || !moneyIn_(body + '\n' + pdfT).length) return null;
+    var both = (body + '\n' + pdfT).split(/\r?\n/).map(function (l) { return l.replace(/\s+/g, ' ').trim(); }).filter(String);
+    r = { kind: 'receipt', fields: receiptFields_(both, both.join('\n')) };
+  }
+  var f = r.fields, sent = (fh && fh.date) || m.getDate(), tz = Session.getScriptTimeZone();
+  var date = f.date, dd = date ? new Date(date + 'T12:00:00') : null;
+  if (!dd || isNaN(dd.getTime()) || dd > new Date(sent.getTime() + 2 * 864e5) || dd < new Date(sent.getTime() - 400 * 864e5)) date = Utilities.formatDate(sent, tz, 'yyyy-MM-dd');
+  var vendor = mailVendor_(fh, subj, m.getFrom()) || f.vendor;
+  var pic = pdfs.length ? pdfs[0].getId() : docId;
+  return { date: date, vendor: vendor, total: f.total, tax: f.tax, card: f.card || '', pay: f.pay || '', fileId: pic,
+    kind: /invoice|\binv\b|statement|bill\b/i.test(subj + ' ' + pdfs.map(function (x) { return x.getName(); }).join(' ')) && !/receipt/i.test(subj) ? 'invoice' : 'receipt',
+    check: (!vendor || f.total === null) ? 'check' : '' };
+}
+function mailReceiptRow_(rc, noteId) {
+  return [rc.date, rc.vendor, rc.total === null ? '' : rc.total, rc.tax === null ? '' : rc.tax, rc.card, '', rc.check, noteId, rc.fileId,
+    'https://drive.google.com/file/d/' + rc.fileId + '/view', new Date().toISOString(), rc.pay, '', '', rc.kind];
+}
+/** Read email notes already in ArNote as receipts (also the "It's a receipt" button). Returns what was found for each. */
+function api_mailReceiptFor(noteIds, force) {
+  var want = {}; (noteIds || []).forEach(function (id) { want[id] = 1; });
+  var have = {}, sh = receiptSheet_(), k = RECEIPT_COLS.indexOf('noteId');
+  if (sh.getLastRow() > 1) sh.getRange(2, k + 1, sh.getLastRow() - 1, 1).getValues().forEach(function (r) { have[String(r[0])] = 1; });
+  var atts = {}; readTable_('Attachments').forEach(function (a) { var id = String(a.noteId); (atts[id] = atts[id] || []).push(a); });
+  var out = [], start = Date.now();
+  readTable_('Notes').forEach(function (n) {
+    if (!want[n.id] || Date.now() - start > 200000) return;
+    if (have[n.id]) { out.push({ id: n.id, title: String(n.title), already: true }); return; }
+    var tid = (String(n.sourceUrl || '').match(/#all\/([\w-]+)/) || [])[1]; if (!tid) { out.push({ id: n.id, title: String(n.title), error: 'not an email' }); return; }
+    try {
+      var msgs = GmailApp.getThreadById(tid).getMessages(), m = msgs[msgs.length - 1];
+      var files = (atts[n.id] || []).map(function (a) { try { return DriveApp.getFileById(String(a.fileId)); } catch (e) { return null; } }).filter(Boolean);
+      var rc = mailReceipt_(m, files, String(n.docId));
+      if (!rc && force) rc = { date: Utilities.formatDate(m.getDate(), Session.getScriptTimeZone(), 'yyyy-MM-dd'), vendor: mailVendor_(fwdHeader_(m.getPlainBody() || ''), String(m.getSubject()).replace(/^\s*((fwd?|fw|re)\s*:\s*)+/i, ''), m.getFrom()), total: null, tax: null, card: '', pay: '', fileId: files.length ? files[0].getId() : String(n.docId), kind: 'receipt', check: 'check' };
+      if (!rc) { out.push({ id: n.id, title: String(n.title), receipt: false }); return; }
+      sh.appendRow(mailReceiptRow_(rc, n.id)); have[n.id] = 1;
+      api_batchUpdate([n.id], { addTags: ['Receipt'] });
+      out.push({ id: n.id, title: String(n.title), receipt: true, fields: rc });
+    } catch (e) { out.push({ id: n.id, title: String(n.title), error: String(e.message || e) }); }
+  });
+  try { buildReceiptReport_(); } catch (e) {}
+  return out;
 }
 
 /* ---------------- Print ----------------
@@ -1650,7 +1745,7 @@ function api_photoMonths(o) {
  *  - Anything else stays a normal photo.
  * The note is a linked note pointing at the photo itself, so nothing is copied.
  */
-var RECEIPT_COLS = ['date', 'vendor', 'total', 'tax', 'card', 'category', 'check', 'noteId', 'fileId', 'photo', 'added', 'pay', 'checkNo', 'billed'];
+var RECEIPT_COLS = ['date', 'vendor', 'total', 'tax', 'card', 'category', 'check', 'noteId', 'fileId', 'photo', 'added', 'pay', 'checkNo', 'billed', 'kind'];
 
 function receiptSheet_() {
   var sh = ensureSheet_('Receipts', RECEIPT_COLS);
@@ -1922,9 +2017,9 @@ function reportSheet_() {
 }
 function buildReceiptReport_(force) {
   var d = api_receipts(), sh = reportSheet_(), cols = d.cols;
-  var head = ['Date', 'Vendor'].concat(cols.map(function (c) { return c.name; }), ['Paid with', 'Tax', 'Total', 'Billed?', 'Billed on', 'Other tags', 'Check', 'Receipt', 'Note']);
+  var head = ['Date', 'Vendor', 'Type'].concat(cols.map(function (c) { return c.name; }), ['Paid with', 'Tax', 'Total', 'Billed?', 'Billed on', 'Other tags', 'Check', 'Receipt', 'Note']);
   var rows = d.rows.slice().sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); });
-  var key = JSON.stringify([head, rows.map(function (r) { return [r.date, r.vendor, r.cols, r.paid, r.tax, r.total, r.billed, r.other, r.title, r.fileId]; })]);
+  var key = JSON.stringify([head, rows.map(function (r) { return [r.date, r.vendor, r.kind, r.cols, r.paid, r.tax, r.total, r.billed, r.other, r.title, r.fileId]; })]);
   var h = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, key));
   if (!force && props_().getProperty('rcReportHash') === h && sh.getLastRow() === rows.length + 1) return false;   // nothing changed
   var day = function (s) { return s ? new Date(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) : ''; };
@@ -1933,7 +2028,7 @@ function buildReceiptReport_(force) {
     var chk = [];
     if (!r.vendor) chk.push('no vendor'); if (!r.date) chk.push('no date'); if (r.total === null) chk.push('no total');
     cols.forEach(function (c, i) { if (r.cols[i].length > 1) chk.push(r.cols[i].length + ' ' + c.name + ' tags: ' + r.cols[i].join(', ')); });
-    return [day(r.date), txt(r.vendor)].concat(r.cols.map(function (x) { return txt(x[0]); }),
+    return [day(r.date), txt(r.vendor), r.kind === 'invoice' ? 'Invoice' : 'Receipt'].concat(r.cols.map(function (x) { return txt(x[0]); }),
       [txt(r.paid), r.tax === null ? '' : r.tax, r.total === null ? '' : r.total, r.billed ? 'Yes' : 'No', day(r.billed), txt(r.other.join(', ')), chk.join('; '),
        r.fileId ? '=HYPERLINK("https://drive.google.com/file/d/' + r.fileId + '/view","Picture")' : '', txt(r.title)]);
   });
@@ -1972,6 +2067,7 @@ function api_receipts() {
       card: card, pay: pay, checkNo: String(o.checkNo || ''), paid: paid,
       cols: sets.map(function (s) { return tags.filter(function (t) { return s[t]; }); }),
       other: tags.filter(function (t) { return t !== 'Receipt' && t.charAt(0) !== '@' && !sets.some(function (s) { return s[t]; }); }),
+      kind: String(o.kind || 'receipt'),
       billed: o.billed instanceof Date ? Utilities.formatDate(o.billed, tz, 'yyyy-MM-dd') : String(o.billed || '').slice(0, 10),
       check: !o.vendor || !date || total === null });
   });
