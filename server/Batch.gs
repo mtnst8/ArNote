@@ -227,6 +227,7 @@ function processDrop() {
     try { syncPhotos_(Date.now() - 60000); } catch (e) { Logger.log('Photos: ' + e); }
     try { if (Date.now() - start < 200000) processMail_(Date.now(), 40000); } catch (e) { Logger.log('Mail: ' + e); }
     try { scanQueue_(90000); } catch (e) { Logger.log('Scan: ' + e); }
+    try { buildReceiptReport_(); } catch (e) { Logger.log('Receipt report: ' + e); }
     try { if (Date.now() - start < 230000) geoWork_(Date.now(), 45000); } catch (e) { Logger.log('Geo: ' + e); }
     try { if (Date.now() - start < 250000) photoDedupe_(40000); } catch (e) { Logger.log('Dedupe: ' + e); }
   } finally { lock.releaseLock(); }
@@ -1901,10 +1902,56 @@ function api_receiptCfg(cfg) {
       .filter(function (x) { return x.name && x.parent; }).slice(0, 3);
     var cards = {}; Object.keys(cfg.cards || {}).forEach(function (k) { var n = String(cfg.cards[k] || '').trim(); if (/^\d{4}$/.test(k) && n) cards[k] = n.slice(0, 30); });
     props_().setProperty('receiptCfg', JSON.stringify({ cols: cols, cards: cards }));
+    try { buildReceiptReport_(true); } catch (e) {}
   }
   return receiptCfg_();
 }
 function last4_(v) { var s = String(v === null || v === undefined ? '' : v).replace(/\D/g, ''); return s ? ('0000' + s).slice(-4) : ''; }
+
+/* ---------- "Receipt report" tab: one fact per cell, for tax and billing work in the spreadsheet ----------
+ * Date | Vendor | <report columns, e.g. Job, Category> | Paid with | Tax | Total | Billed? | Billed on | Other tags | Check | Receipt | Note
+ * Rebuilt from ArNote (every 15 minutes and after any receipt change); edits belong in the app. */
+function reportSheet_() {
+  var ss = ss_(), sh = ss.getSheetByName('Receipt report');
+  if (!sh) {
+    sh = ss.insertSheet('Receipt report', 0);
+    var data = ss.getSheetByName('Receipts');
+    if (data) { try { data.protect().setDescription('ArNote data: change receipts in the app').setWarningOnly(true); data.setTabColor('#999999'); } catch (e) {} }
+  }
+  return sh;
+}
+function buildReceiptReport_(force) {
+  var d = api_receipts(), sh = reportSheet_(), cols = d.cols;
+  var head = ['Date', 'Vendor'].concat(cols.map(function (c) { return c.name; }), ['Paid with', 'Tax', 'Total', 'Billed?', 'Billed on', 'Other tags', 'Check', 'Receipt', 'Note']);
+  var rows = d.rows.slice().sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); });
+  var key = JSON.stringify([head, rows.map(function (r) { return [r.date, r.vendor, r.cols, r.paid, r.tax, r.total, r.billed, r.other, r.title, r.fileId]; })]);
+  var h = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, key));
+  if (!force && props_().getProperty('rcReportHash') === h && sh.getLastRow() === rows.length + 1) return false;   // nothing changed
+  var day = function (s) { return s ? new Date(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) : ''; };
+  var txt = function (s) { s = String(s || ''); return /^[=+\-@]/.test(s) ? "'" + s : s; };
+  var data = rows.map(function (r) {
+    var chk = [];
+    if (!r.vendor) chk.push('no vendor'); if (!r.date) chk.push('no date'); if (r.total === null) chk.push('no total');
+    cols.forEach(function (c, i) { if (r.cols[i].length > 1) chk.push(r.cols[i].length + ' ' + c.name + ' tags: ' + r.cols[i].join(', ')); });
+    return [day(r.date), txt(r.vendor)].concat(r.cols.map(function (x) { return txt(x[0]); }),
+      [txt(r.paid), r.tax === null ? '' : r.tax, r.total === null ? '' : r.total, r.billed ? 'Yes' : 'No', day(r.billed), txt(r.other.join(', ')), chk.join('; '),
+       r.fileId ? '=HYPERLINK("https://drive.google.com/file/d/' + r.fileId + '/view","Picture")' : '', txt(r.title)]);
+  });
+  sh.clear();
+  sh.getRange(1, 1, 1, head.length).setValues([head]).setFontWeight('bold').setBackground('#eeeeee');
+  sh.setFrozenRows(1);
+  sh.getRange('A1').setNote('Built by ArNote. Change receipts, tags and "billed" in the app; this tab is rewritten to match.');
+  if (data.length) {
+    sh.getRange(2, 1, data.length, head.length).setValues(data);
+    var at = function (name) { return head.indexOf(name) + 1; };
+    sh.getRange(2, 1, data.length, 1).setNumberFormat('yyyy-mm-dd');
+    sh.getRange(2, at('Billed on'), data.length, 1).setNumberFormat('yyyy-mm-dd');
+    sh.getRange(2, at('Tax'), data.length, 2).setNumberFormat('$#,##0.00');
+  }
+  try { sh.autoResizeColumns(1, head.length); } catch (e) {}
+  props_().setProperty('rcReportHash', h);
+  return true;
+}
 
 /** Every receipt with its tags sorted into the report columns. */
 function api_receipts() {
@@ -1928,7 +1975,7 @@ function api_receipts() {
       billed: o.billed instanceof Date ? Utilities.formatDate(o.billed, tz, 'yyyy-MM-dd') : String(o.billed || '').slice(0, 10),
       check: !o.vendor || !date || total === null });
   });
-  return { cols: cfg.cols, cards: cfg.cards, seenCards: Object.keys(seenCards).sort(), rows: rows, url: ss_().getUrl() + '#gid=' + sh.getSheetId() };
+  return { cols: cfg.cols, cards: cfg.cards, seenCards: Object.keys(seenCards).sort(), rows: rows, url: ss_().getUrl() + '#gid=' + reportSheet_().getSheetId() };
 }
 
 /** Mark receipts billed to the customer (date = today) or not billed (on = false). */
@@ -1942,6 +1989,7 @@ function api_receiptBilled(noteIds, on) {
     var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
     ids.forEach(function (r, i) { if (want[String(r[0])]) { v[i][0] = on ? (typeof on === 'string' ? on.slice(0, 10) : today) : ''; cnt++; } });
     rng.setNumberFormat('@').setValues(v);
+    try { buildReceiptReport_(); } catch (e) {}
     return cnt;
   } finally { lock.releaseLock(); }
 }
@@ -1963,6 +2011,7 @@ function api_receiptUpdate(noteId, f) {
       if (f.checkNo !== undefined) r[C('checkNo')] = String(f.checkNo || '').replace(/[^\w-]/g, '').slice(0, 12);
       r[C('check')] = (!r[C('vendor')] || !r[C('date')] || r[C('total')] === '') ? 'check' : '';
       sh.getRange(i + 2, 1, 1, RECEIPT_COLS.length).setValues([r]);
+      try { buildReceiptReport_(); } catch (e) {}
       return true;
     }
     throw new Error('Receipt not found');

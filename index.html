@@ -1505,7 +1505,7 @@ function rcRange(){var d=new Date(),y=d.getFullYear(),m=('0'+(d.getMonth()+1)).s
   return {year:[y+'-01-01',y+'-12-31'],last:[(y-1)+'-01-01',(y-1)+'-12-31'],month:[y+'-'+m+'-01',y+'-'+m+'-31'],lastmonth:[pms+'-01',pms+'-31'],all:['',''],custom:[RC.from,RC.to]}[RC.per]||['','']}
 function viewReceipts(){
   $('#main').classList.add('wide');
-  $('#main').innerHTML='<div class="lhead"><h2>Receipts</h2><span class="grow"></span><a class="btn small" id="rcSheet" target="_blank" style="display:none">Spreadsheet ↗</a></div><div id="rcBody"><p class="muted">Loading…</p></div>';
+  $('#main').innerHTML='<div class="lhead"><h2>Receipts</h2><span class="grow"></span><a class="btn small" id="rcSheet" target="_blank" style="display:none" title="The Receipt report tab: one value per cell, ready for filters and pivot tables">Spreadsheet ↗</a></div><div id="rcBody"><p class="muted">Loading…</p></div>';
   call('api_receipts').then(function(d){S.rcData=d;if(S.view==='receipts')rcDraw()}).catch(function(){$('#rcBody').innerHTML='<p class="muted">Could not load receipts.</p>'});
 }
 function rcDraw(){
@@ -1589,8 +1589,10 @@ function rcDraw(){
   var title=(crumb.length?crumb.map(function(c){return c[1]==='__none'?'No '+cols[c[0]].name:c[1]}).join(' › ')+' — ':'')+'Receipts '+(rg[0]||'')+(rg[1]?' to '+rg[1]:'');
   $('#rcCsv').onclick=function(){
     var qv=function(v){v=String(v===null||v===undefined?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
-    var lines=[['Date','Vendor'].concat(cols.map(function(c){return c.name}),['Other tags','Paid with','Tax','Total','Note']).map(qv).join(',')].concat(rows.map(function(r){
-      return [r.date,r.vendor].concat(r.cols.map(function(x){return x.join('; ')}),[r.other.join('; '),r.paid,r.tax,r.total,r.title]).map(qv).join(',')}));
+    var lines=[['Date','Vendor'].concat(cols.map(function(c){return c.name}),['Paid with','Tax','Total','Billed?','Billed on','Other tags','Check','Note']).map(qv).join(',')].concat(rows.map(function(r){
+      var chk=[];if(!r.vendor)chk.push('no vendor');if(!r.date)chk.push('no date');if(r.total===null)chk.push('no total');
+      cols.forEach(function(c,i){if(r.cols[i].length>1)chk.push(r.cols[i].length+' '+c.name+' tags: '+r.cols[i].join(', '))});
+      return [r.date,r.vendor].concat(r.cols.map(function(x){return x[0]||''}),[r.paid,r.tax,r.total,r.billed?'Yes':'No',r.billed||'',r.other.join(', '),chk.join('; '),r.title]).map(qv).join(',')}));
     var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([lines.join('\r\n')],{type:'text/csv'}));a.download=title.replace(/[^\w -]/g,'').trim()+'.csv';document.body.appendChild(a);a.click();a.remove()};
   $('#rcPrint').onclick=function(){var w=window.open('','_blank');if(!w){toast('Allow pop-ups to print');return}
     w.document.write('<!doctype html><title>'+esc(title)+'</title><style>body{font:12px system-ui,sans-serif;margin:24px;color:#111}h1{font-size:16px;margin:0 0 4px}p{margin:0 0 12px;color:#555}table{border-collapse:collapse;width:100%}th,td{padding:4px 6px;border-bottom:1px solid #ddd;text-align:left}th{border-bottom:2px solid #333}.n{text-align:right;white-space:nowrap}.rcg td{font-weight:700;background:#f2f2f2}tfoot td{font-weight:700;border-top:2px solid #333}.rcw,.muted{color:#888;font-weight:400}</style>'+
