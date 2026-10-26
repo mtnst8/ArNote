@@ -1,5 +1,5 @@
 /* ArNote service worker: makes the app installable, loads it fast, and receives things shared from other apps. */
-const VERSION = 'arnote-v45';
+const VERSION = 'arnote-v46';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {

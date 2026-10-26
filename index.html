@@ -1642,7 +1642,7 @@ function rcDetails(noteId){
       d.cols.map(function(c,i){var opts=descendants(c.parent).filter(function(t){return t!==c.parent}).sort(function(a,b){return a.localeCompare(b)}),cur=r.cols[i][0]||'';
         return '<label>'+esc(c.name)+(r.cols[i].length>1?' <span class="rcw">⚠ has '+r.cols[i].length+': '+esc(r.cols[i].join(', '))+' — saving keeps one</span>':'')+'<select class="field" data-rcol="'+i+'"><option value="">—</option>'+
           opts.map(function(t){return '<option'+(t===cur?' selected':'')+'>'+esc(t)+'</option>'}).join('')+'</select></label>'}).join('')+
-      '<label style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" id="rdBill"'+(r.billed?' checked':'')+' style="width:auto;margin:0"> Billed to the customer<input class="field" type="date" id="rdBillD" value="'+esc(r.billed||'')+'" style="width:auto;margin:0;'+(r.billed?'':'display:none')+'"></label>'+
+      '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;min-height:38px"><input type="checkbox" id="rdBill"'+(r.billed?' checked':'')+' style="width:18px;height:18px;margin:0;flex:none"><span style="cursor:pointer" onclick="var c=document.getElementById(\'rdBill\');c.checked=!c.checked;c.onchange()">Billed to the customer</span><input class="field" type="date" id="rdBillD" value="'+esc(r.billed||'')+'" style="width:auto;margin:0;'+(r.billed?'':'display:none')+'"></div>'+
       (r.other.length?'<p class="muted" style="margin:6px 0 0;font-size:12px"><b>Other tags:</b> '+esc(r.other.join(', '))+'</p>':'')+
       '</div></div>',
       '<button class="btn" id="rdNote">Open note</button><span class="grow"></span><button class="btn" id="rdX">Cancel</button><button class="btn primary" id="rdSave">Save</button>');
