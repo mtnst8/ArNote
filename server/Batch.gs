@@ -489,7 +489,7 @@ function api_appInfo() {
  * Every other copy checks in once a day with its owner's email, an install id, its build and the last day the app was opened —
  * nothing else (no notes, tags or photos). Someone removed (or never added) gets ok:false and their app shows
  * "access ended"; their notes and photos in their own Drive are never touched. */
-var ARNOTE_BUILD = 57;
+var ARNOTE_BUILD = 58;
 var LICENCE_SCRIPT_ID = '1NmFRd6lH63u-JBeTJfg0IyMZtDJj6jxw8WNfbOdh_TSTuOpVZ5JJ2s4B';
 var LICENCE_URL = 'https://script.google.com/macros/s/AKfycbyFPAGYJE1bVycoBv8QamFeUHuBjbCAhogOM8mSU7vn20CVO_Ex1XJYfRy7f7lZES-_Kg/exec';
 var USER_COLS = ['email', 'name', 'status', 'plan', 'added', 'lastUsed', 'lastCheckin', 'build', 'install', 'note'];
