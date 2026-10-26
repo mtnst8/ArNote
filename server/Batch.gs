@@ -222,6 +222,7 @@ function installDropTrigger() {
 function processDrop() {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(5000)) return [];
+  try { warmCode_(); } catch (e) {}
   var made = [], start = Date.now();
   try {
     var drop = dropFolder_();
@@ -561,7 +562,7 @@ function arnoteSetupAll_() {
   if (!p.getProperty('receiptCfg')) p.setProperty('receiptCfg', JSON.stringify({ cols: [{ name: 'Job', parent: 'Jobs' }, { name: 'Category', parent: 'Expense Categories' }], cards: {} }));
   try { var cf = p.getProperty('codeFile'); if (cf) DriveApp.getFileById(cf).moveTo(DriveApp.getFolderById(p.getProperty('rootId'))); } catch (e) {}
   noteUsed_(); try { licenceCheck_(); } catch (e) {}
-  return 'Your ArNote folder, index and starter tags are ready.\n\nLast step (once): in this spreadsheet choose Extensions → Apps Script. In the window that opens click Deploy (top right) → New deployment → the gear ⚙ → Web app. Set "Execute as: Me" and "Who has access: Anyone", click Deploy and allow the permissions, then click Copy under "Web app URL".\n\nThen come back here, choose ArNote → Open the app and paste that address. You'll get your pairing link for your phone and computer.';
+  return 'Your ArNote folder, index and starter tags are ready.\n\nLast step (once): in this spreadsheet choose Extensions → Apps Script. In the window that opens click Deploy (top right) → New deployment → the gear ⚙ → Web app. Set "Execute as: Me" and "Who has access: Anyone", click Deploy and allow the permissions, then click Copy under "Web app URL".\n\nThen come back here, choose ArNote → Open the app and paste that address. You\'ll get your pairing link for your phone and computer.';
 }
 
 /* ---------- Updates: Brian releases a version; copies on the list load it ----------
@@ -580,6 +581,7 @@ function api_releaseNow(note) {
   if (!isLicenceServer_()) throw new Error('Only the owner can release');
   var code = RELEASE_SOURCES.map(function (p) { return '/* ===== ' + p + ' ===== */\n' + releaseRaw_(p); }).join('\n\n');
   if (code.indexOf('function doPost(') < 0 || code.indexOf('function setup(') < 0) throw new Error('The code from GitHub looks incomplete; nothing was released');
+  try { new Function(code); } catch (e) { throw new Error('The code from GitHub has an error (' + e.message + '); nothing was released'); }
   var p = props_(), n = (+p.getProperty('releaseN') || 0) + 1, at = new Date().toISOString();
   var rel = JSON.stringify({ n: n, at: at, note: String(note || '').slice(0, 200), code: code });
   var root = DriveApp.getFolderById(p.getProperty('rootId')), id = p.getProperty('releaseFile'), f = null;
@@ -599,6 +601,20 @@ function releaseFor_(req) {
   var id = props_().getProperty('releaseFile'); if (!id) return null;
   return DriveApp.getFileById(id).getBlob().getDataAsString();
 }
+/** A copy (run by the starter): keep the starter's quick copy of the code fresh. When the sheet opens, Google
+ * doesn't let the starter read Drive, so the ArNote menu only appears if this quick copy is there. Same keys as Loader.gs. */
+function warmCode_(src) {
+  if (typeof ARNOTE_STUBS_ === 'undefined') return;           // Brian's own ArNote runs its code directly
+  var p = props_(), at = +p.getProperty('codeWarmAt') || 0, cache = CacheService.getScriptCache();
+  if (!src && Date.now() - at < 4 * 3600e3 && cache.get('arnote_code_n')) return;
+  try {
+    if (!src) { var id = p.getProperty('codeFile'); if (!id) return; src = DriveApp.getFileById(id).getBlob().getDataAsString(); }
+    var parts = {}, size = 90000, k = 0;
+    for (var j = 0; j < src.length; j += size) parts['arnote_code_' + (k++)] = src.slice(j, j + size);
+    cache.putAll(parts, 21600); cache.put('arnote_code_n', String(k), 21600);
+    p.setProperty('codeWarmAt', String(Date.now()));
+  } catch (e) {}
+}
 /** A copy: download the latest release into this ArNote's code file; the starter uses it from the next run. */
 function selfUpdate_() {
   if (isLicenceServer_()) return null;
@@ -608,11 +624,12 @@ function selfUpdate_() {
   var rel = JSON.parse(body);
   if (+rel.n <= (+p.getProperty('releaseInstalled') || 0)) return null;
   if (String(rel.code || '').indexOf('function doPost(') < 0) throw new Error('The update looks incomplete; kept the current version');
+  try { new Function(rel.code); } catch (e) { throw new Error('The update has an error; kept the current version'); }
   var id = p.getProperty('codeFile'), f = null;
   if (id) { try { f = DriveApp.getFileById(id); if (f.isTrashed()) f = null; } catch (e) { f = null; } }
   if (f) f.setContent(rel.code);
   else { f = (p.getProperty('rootId') ? DriveApp.getFolderById(p.getProperty('rootId')) : DriveApp.getRootFolder()).createFile('ArNote code.js', rel.code, 'text/plain'); p.setProperty('codeFile', f.getId()); }
-  try { CacheService.getScriptCache().remove('arnote_code_n'); } catch (e) {}
+  warmCode_(rel.code);
   p.setProperties({ releaseInstalled: String(rel.n), updatedAt: new Date().toISOString(), updateErr: '' });
   return rel.n;
 }

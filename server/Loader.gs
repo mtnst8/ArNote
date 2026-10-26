@@ -28,8 +28,28 @@ function arnoteLoad_() {
   if (ARNOTE_LOADED_) return;
   var src = arnoteCode_();
   if (!src) throw new Error('ArNote isn\'t set up yet: open the ArNote spreadsheet and choose ArNote → Set up ArNote.');
-  (0, eval)(src);                      // defines ArNote's functions (they replace the stubs below)
+  try { (0, eval)(src); }              // defines ArNote's functions (they replace the stubs below)
+  catch (err) {                        // damaged code: fetch a fresh copy from Brian's ArNote and try once more
+    var fresh = arnoteFetch_(); if (!fresh) throw err;
+    arnoteSaveCode_(fresh); (0, eval)(fresh.code);
+  }
   ARNOTE_LOADED_ = true;
+}
+/** Ask Brian's ArNote for the current release (only answers addresses on his list). */
+function arnoteFetch_() {
+  var p = PropertiesService.getScriptProperties();
+  var inst = p.getProperty('installId'); if (!inst) { inst = Utilities.getUuid(); p.setProperty('installId', inst); }
+  var r = UrlFetchApp.fetch(ARNOTE_HOME, { method: 'post', contentType: 'text/plain', muteHttpExceptions: true,
+    payload: JSON.stringify({ lic: 'code', email: Session.getEffectiveUser().getEmail(), install: inst, build: 0 }) });
+  var body = null; try { body = (JSON.parse(r.getContentText()) || {}).result; } catch (e) {}
+  return body ? JSON.parse(body) : null;
+}
+function arnoteSaveCode_(rel) {
+  var p = PropertiesService.getScriptProperties(), id = p.getProperty('codeFile'), f = null;
+  if (id) { try { f = DriveApp.getFileById(id); if (f.isTrashed()) f = null; } catch (e) { f = null; } }
+  if (f) f.setContent(rel.code); else { f = DriveApp.getRootFolder().createFile('ArNote code.js', rel.code, 'text/plain'); }
+  p.setProperties({ codeFile: f.getId(), releaseInstalled: String(rel.n), updatedAt: new Date().toISOString() });
+  try { CacheService.getScriptCache().remove('arnote_code_n'); } catch (e) {}
 }
 function arnoteRun_(name, args) {
   arnoteLoad_();
@@ -49,22 +69,21 @@ function showAppLink() { return arnoteRun_('showAppLink', []); }
 function authorizeMail() { return arnoteRun_('authorizeMail', []); }
 function onOpen() {
   try { if (PropertiesService.getScriptProperties().getProperty('codeFile')) return arnoteRun_('onOpen', []); } catch (e) {}
-  SpreadsheetApp.getUi().createMenu('ArNote').addItem('Set up ArNote', 'arnoteFirstSetup').addToUi();
+  var m = SpreadsheetApp.getUi().createMenu('ArNote');
+  if (arnoteIsSetUp_()) m.addItem('Open the app', 'showAppLink').addItem('Start / resume Evernote import', 'startImport').addItem('Import status', 'showImportStatus');
+  else m.addItem('Set up ArNote', 'arnoteFirstSetup');
+  m.addToUi();
 }
+function arnoteIsSetUp_() { try { return !!PropertiesService.getScriptProperties().getProperty('codeFile'); } catch (e) { return false; } }
 ['doGet', 'doPost', 'processDrop', 'importBatch', 'startImport', 'showImportStatus', 'showAppLink', 'authorizeMail', 'onOpen'].forEach(function (n) { ARNOTE_STUBS_[n] = globalThis[n]; });
 
 /** First time: fetch ArNote from Brian's (only works if you're on his list), then set everything up. */
 function arnoteFirstSetup() {
   var ui = null; try { ui = SpreadsheetApp.getUi(); } catch (e) {}
-  var p = PropertiesService.getScriptProperties(), me = Session.getEffectiveUser().getEmail();
-  var inst = p.getProperty('installId'); if (!inst) { inst = Utilities.getUuid(); p.setProperty('installId', inst); }
-  var r = UrlFetchApp.fetch(ARNOTE_HOME, { method: 'post', contentType: 'text/plain', muteHttpExceptions: true,
-    payload: JSON.stringify({ lic: 'code', email: me, install: inst, build: 0 }) });
-  var body = null; try { body = (JSON.parse(r.getContentText()) || {}).result; } catch (e) {}
-  if (!body) { var msg = me + ' isn\'t on the ArNote list yet. Ask the person who invited you to add this exact address, then try again.'; if (ui) ui.alert(msg); return msg; }
-  var rel = JSON.parse(body), f = DriveApp.getRootFolder().createFile('ArNote code.js', rel.code, 'text/plain');
-  p.setProperties({ codeFile: f.getId(), releaseInstalled: String(rel.n), updatedAt: new Date().toISOString() });
-  try { CacheService.getScriptCache().remove('arnote_code_n'); } catch (e) {}
+  if (arnoteIsSetUp_()) { var done = 'ArNote is already set up here. Choose ArNote \u2192 Open the app.'; if (ui) ui.alert(done); return done; }
+  var rel = arnoteFetch_();
+  if (!rel) { var msg = Session.getEffectiveUser().getEmail() + ' isn\'t on the ArNote list yet. Ask the person who invited you to add this exact address, then try again.'; if (ui) ui.alert(msg); return msg; }
+  arnoteSaveCode_(rel);
   arnoteLoad_();
   var out = arnoteRun_('arnoteSetupAll_', []);       // folders, sheets, starter tags, private key, 15-minute job; moves the code file into the ArNote folder
   if (ui) ui.alert('ArNote is set up', out, ui.ButtonSet.OK);

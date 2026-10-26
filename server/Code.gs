@@ -13,11 +13,11 @@ var TAG_SEP = '; ';
 /* ---------------- menu & setup ---------------- */
 
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('ArNote')
-    .addItem('Set up (first time)', 'setup')
+  var m = SpreadsheetApp.getUi().createMenu('ArNote');
+  if (typeof ARNOTE_STUBS_ === 'undefined') m.addItem('Set up (first time)', 'setup');   // copies are set up by the starter
+  m.addItem('Open the app', 'showAppLink')
     .addItem('Start / resume Evernote import', 'startImport')
     .addItem('Import status', 'showImportStatus')
-    .addItem('Open the app', 'showAppLink')
     .addToUi();
 }
 
