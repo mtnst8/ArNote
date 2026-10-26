@@ -1522,6 +1522,7 @@ function viewSettings(){
     '<h3 style="margin:16px 0 4px;font-size:15px">Email to ArNote</h3><div id="mset" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Receipts</h3><div id="rcpt" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Photo places</h3><div id="plset" class="muted" style="font-size:13px">Loading…</div>'+
+    '<h3 style="margin:16px 0 4px;font-size:15px">Backup</h3><div id="bkset" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Shared links</h3><div id="sset" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Google accounts</h3><div id="acct" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Linked Drive folders</h3><div id="lfold" class="muted" style="font-size:13px">Loading…</div>'+
@@ -1530,7 +1531,7 @@ function viewSettings(){
     '<p class="muted" style="font-size:12px;margin-top:14px">ArNote · your notes stay in your own Google Drive.</p></div>';
   $('#cpPair').onclick=function(){var l=pairLink();(navigator.clipboard?navigator.clipboard.writeText(l):Promise.reject()).then(function(){toast('Pairing link copied')}).catch(function(){prompt('Copy this link:',l)})};
   if($('#shPair')) $('#shPair').onclick=function(){navigator.share({title:'ArNote pairing link',text:pairLink()}).catch(function(){})};
-  drawMailSet(); drawPlaceSet();
+  drawMailSet(); drawPlaceSet(); drawBackupSet();
   call('api_linkedFolders').then(function(fs){var el=$('#lfold');if(!el)return;
     el.innerHTML=fs.length?fs.map(function(f){return '<div class="setrow"><span>📁 '+esc(f.name)+'</span><button class="btn small" data-uw="'+esc(f.id)+'">Stop syncing</button></div>'}).join('')+
       '<p style="margin:4px 0 0">New files in these folders are added to the Cabinet every 15 minutes. Stopping keeps the notes already made.</p>':'None yet. Link a folder from Inbox → 🔗 Link Drive files.';
@@ -1754,6 +1755,27 @@ function drawRcSet(){
     $('#rcAddC').onclick=function(){var v=$('#rcNewC').value.replace(/\D/g,''),n=$('#rcNewN').value.trim();if(v.length!==4||!n){toast('Enter the last 4 digits and a name');return}var c=collect();c.cards[v]=n;save(c,this)};
     $('#rcSaveCfg').onclick=function(){save(collect(),this)};
   }).catch(function(){var el=$('#rcpt');if(el)el.textContent='Not set up yet.'});
+}
+/* ---------- backup settings ---------- */
+function drawBackupSet(){
+  call('api_backups').then(function(b){var el=$('#bkset');if(!el)return;
+    var nice=function(n){var m=n.match(/^(\d{4})-(\d\d)-(\d\d)(?: (\d\d)-(\d\d))?(?: \((.+)\))?$/);if(!m)return esc(n);
+      var d=new Date(+m[1],+m[2]-1,+m[3],m[4]?+m[4]:3,m[5]?+m[5]:0);return esc(d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric',year:'numeric'})+(m[4]?' '+d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}):'')+(m[6]?' · '+m[6]:' · daily'))};
+    el.innerHTML='<p style="margin:0 0 6px">Every day around 3 AM ArNote saves a copy of its index — every note\'s tags and filing, photo tags and places, receipts — plus your settings, to <a href="'+esc(b.folderUrl)+'" target="_blank" style="color:var(--acc)">ArNote Backups</a> in your Drive. The last 30 days are kept. Your notes and photos themselves are ordinary Drive files with Drive\'s own history and 30-day trash.</p>'+
+      '<div class="setrow"><button class="btn small primary" id="bkNow">Back up now</button>'+(b.last?'<span>Last backup: '+fmt(b.last.at)+'</span>':'<span>No backup yet</span>')+'</div>'+
+      (b.list.length?'<details style="margin-top:4px"><summary style="cursor:pointer">'+b.list.length+' backup'+(b.list.length>1?'s':'')+' — open or restore</summary>'+
+        b.list.map(function(x){return '<div class="setrow"><span style="min-width:230px">'+nice(x.name)+'</span><a class="btn small" href="'+esc(x.url)+'" target="_blank">Open</a><button class="btn small" data-bkr="'+esc(x.id)+'" data-bkn="'+esc(x.name)+'">Restore…</button></div>'}).join('')+'</details>':'')+
+      '<p style="margin:10px 0 0;font-size:12px">For a copy outside Google too (in case the whole account is ever lost): <a href="https://takeout.google.com" target="_blank" style="color:var(--acc)">Google Takeout</a> → choose Drive → <b>Export every 2 months for 1 year</b> — Google emails you a download each time.</p>';
+    $('#bkNow').onclick=function(){var x=this;x.disabled=true;x.textContent='Backing up…';
+      call('api_backupNow').then(function(r){toast('Backed up: '+r.name);drawBackupSet()}).catch(function(e){toast(e.message);x.disabled=false;x.textContent='Back up now'})};
+    $$('#bkset [data-bkr]').forEach(function(btn){btn.onclick=function(){var id=btn.dataset.bkr,nm=btn.dataset.bkn;
+      modal('Restore this backup?','Puts ArNote back the way it was at '+nm+'.',
+        '<p style="margin:0 0 8px">Every note\'s tags and filing, photo tags and places, receipts and settings go back to that point. Anything tagged, filed or added after it loses those changes (notes and photos themselves stay in Drive).</p><p class="muted" style="margin:0;font-size:13px">A backup of how things are right now is made first, so you can undo this by restoring that one.</p>',
+        '<span class="grow"></span><button class="btn" id="bkX">Cancel</button><button class="btn danger" id="bkGo">Restore</button>');
+      $('#bkX').onclick=closeModal;
+      $('#bkGo').onclick=function(){var g=this;g.disabled=true;g.textContent='Restoring…';
+        call('api_backupRestore',id).then(function(r){closeModal();toast('Restored '+nm+' — safety copy: '+r.safety);return load(true)}).then(function(){go('settings')}).catch(function(e){toast(e.message);g.disabled=false;g.textContent='Restore'})}}});
+  }).catch(function(e){var el=$('#bkset');if(el)el.textContent='Not available yet ('+e.message+').'});
 }
 /* ---------- photo places settings ---------- */
 function drawPlaceSet(){

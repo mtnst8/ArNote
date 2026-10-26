@@ -239,6 +239,7 @@ function processDrop() {
     try { syncPhotos_(Date.now() - 60000); } catch (e) { Logger.log('Photos: ' + e); }
     try { if (Date.now() - start < 200000) processMail_(Date.now(), 40000); } catch (e) { Logger.log('Mail: ' + e); }
     try { scanQueue_(90000); } catch (e) { Logger.log('Scan: ' + e); }
+    try { if (Date.now() - start < 170000) backupDaily_(); } catch (e) { Logger.log('Backup: ' + e); }
     try { buildReceiptReport_(); } catch (e) { Logger.log('Receipt report: ' + e); }
     try { if (Date.now() - start < 230000) geoWork_(Date.now(), 45000); } catch (e) { Logger.log('Geo: ' + e); }
     try { if (Date.now() - start < 250000) photoDedupe_(40000); } catch (e) { Logger.log('Dedupe: ' + e); }
@@ -759,6 +760,83 @@ function noteFromMail_(m, th) {
   files.forEach(function (f) { attSh.appendRow([id, f.getId(), f.getName(), f.getMimeType(), f.getSize(), '']); });
   if (rc) receiptSheet_().appendRow(mailReceiptRow_(rc, id));
   return { id: id, title: st.title, receipt: !!rc };
+}
+
+/* ---------------- Backup ----------------
+ * Every day (after 3 AM) and on demand: "ArNote Backups/<date>" gets a copy of every tab of the index spreadsheet
+ * (notes list + tags + filing, photo tags and places, receipts, attachments) and settings.json.
+ * The notes and photos themselves are Drive files (Drive keeps their history and a 30-day trash); the index is what this protects.
+ * Keeps the 30 newest daily backups and the 10 newest others. Restore puts a backup's tabs back (after a safety backup of now). */
+var BACKUP_KEEP_PROPS_ = ['shares', 'receiptCfg', 'places', 'mailSenders', 'bookmarkOrder', 'scratch', 'pinnedNote', 'watchFolders', 'accountTags'];
+function backupRoot_() {
+  var p = props_(), root = DriveApp.getFolderById(p.getProperty('rootId'));
+  var f = getOrCreateFolder_(p.getProperty('backupId'), 'ArNote Backups', root);
+  p.setProperty('backupId', f.getId()); return f;
+}
+function makeBackup_(label) {
+  var tz = Session.getScriptTimeZone(), now = new Date(), ss = ss_();
+  var name = Utilities.formatDate(now, tz, 'yyyy-MM-dd') + (label ? ' ' + Utilities.formatDate(now, tz, 'HH-mm') + ' (' + label + ')' : '');
+  var folder = backupRoot_().createFolder(name);
+  var copy = SpreadsheetApp.create('ArNote index ' + name), first = copy.getSheets()[0];
+  ss.getSheets().forEach(function (sh) { if (sh.getName() !== 'Receipt report') sh.copyTo(copy).setName(sh.getName()); });
+  copy.deleteSheet(first);
+  DriveApp.getFileById(copy.getId()).moveTo(folder);
+  var all = props_().getProperties(), keep = {};
+  BACKUP_KEEP_PROPS_.forEach(function (k) { if (all[k] !== undefined) keep[k] = all[k]; });
+  folder.createFile('settings.json', JSON.stringify({ made: now.toISOString(), version: 1, settings: keep }, null, 1), 'application/json');
+  props_().setProperty('backupLast', JSON.stringify({ at: now.toISOString(), name: name }));
+  pruneBackups_();
+  return { name: name, id: folder.getId(), url: folder.getUrl() };
+}
+function pruneBackups_() {
+  var it = backupRoot_().getFolders(), daily = [], other = [];
+  while (it.hasNext()) { var f = it.next(); (/^\d{4}-\d\d-\d\d$/.test(f.getName()) ? daily : other).push(f); }
+  [[daily, 30], [other, 10]].forEach(function (x) {
+    x[0].sort(function (a, b) { return b.getName().localeCompare(a.getName()); }).slice(x[1]).forEach(function (f) { f.setTrashed(true); });
+  });
+}
+function backupDaily_() {
+  var tz = Session.getScriptTimeZone(), now = new Date(), today = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+  if (+Utilities.formatDate(now, tz, 'H') < 3) return false;
+  var last = {}; try { last = JSON.parse(props_().getProperty('backupLast') || '{}'); } catch (e) {}
+  var it = backupRoot_().getFoldersByName(today); if (it.hasNext()) return false;          // today's is done
+  makeBackup_(''); return true;
+}
+function api_backupNow() { return makeBackup_('manual'); }
+function api_backups() {
+  var it = backupRoot_().getFolders(), out = [];
+  while (it.hasNext()) { var f = it.next(); out.push({ id: f.getId(), name: f.getName(), url: f.getUrl() }); }
+  out.sort(function (a, b) { return b.name.localeCompare(a.name); });
+  var last = null; try { last = JSON.parse(props_().getProperty('backupLast') || 'null'); } catch (e) {}
+  return { last: last, list: out, folderUrl: backupRoot_().getUrl() };
+}
+/** Put a backup back: every tab of its index copy replaces the same tab now, plus its settings. A safety backup of now is made first. */
+function api_backupRestore(folderId) {
+  var folder = DriveApp.getFolderById(folderId);
+  if (folder.getParents().next().getId() !== backupRoot_().getId()) throw new Error('Not an ArNote backup');
+  var files = folder.getFilesByType(MimeType.GOOGLE_SHEETS); if (!files.hasNext()) throw new Error('This backup has no index copy');
+  var src = SpreadsheetApp.openById(files.next().getId());
+  var safety = makeBackup_('before restore');
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  var done = [];
+  try {
+    var ss = ss_();
+    src.getSheets().forEach(function (s) {
+      var name = s.getName(), dst = ss.getSheetByName(name); if (!dst || name === 'Receipt report') return;
+      var v = s.getDataRange().getValues();
+      dst.clearContents();
+      if (v.length && v[0].length) dst.getRange(1, 1, v.length, v[0].length).setValues(v);
+      done.push(name + ' (' + Math.max(0, v.length - 1) + ')');
+    });
+    var js = folder.getFilesByName('settings.json');
+    if (js.hasNext()) {
+      var st = (JSON.parse(js.next().getBlob().getDataAsString()) || {}).settings || {};
+      BACKUP_KEEP_PROPS_.forEach(function (k) { if (st[k] !== undefined) props_().setProperty(k, st[k]); });
+    }
+    props_().deleteProperty('rcReportHash');
+  } finally { lock.releaseLock(); }
+  try { buildReceiptReport_(true); } catch (e) {}
+  return { restored: done, safety: safety.name };
 }
 
 /* ---------------- Emailed receipts and invoices ----------------
