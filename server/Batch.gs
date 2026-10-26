@@ -569,24 +569,53 @@ function api_userResend(email) {
   inviteEmail_(u.contact || u.email, u.name, tok);
   return api_users();
 }
+/* The invite email is an ordinary ArNote note ("ArNote invite email", in the Cabinet) that Brian can edit like any note.
+ * First line "Subject: …"; {first name}, {invite button} and {from} are filled in when it is sent. */
+var INVITE_DEFAULT_ = ['Subject: You\'re invited to ArNote', '',
+  'Hi {first name},', '',
+  'You\'re invited to ArNote, the notes-and-photos app I\'ve been building.', '',
+  'What it does:',
+  '- Notes, photos, receipts, business cards and documents in one place, organized by tags (Who / What / When / Where to start).',
+  '- Everything lives in YOUR own Google Drive. I can\'t see your notes, and nothing is stored anywhere else.',
+  '- Photos: one gallery you can drill into by tag or by place on a map.',
+  '- Receipts: tag by job and expense category, mark billed / not billed, print a clean report.',
+  '- Email in: forward any email (receipts, invoices, anything) to your ArNote address and it lands in your Inbox to tag.',
+  '- Daily backup, and new features show up on their own.', '',
+  'Start here (about 10 minutes, best on a computer; you\'ll need a Google account, a free Gmail is fine):',
+  '{invite button}', '',
+  'Then put it on your phone too. That\'s where it shines: snap a receipt or a business card, or send photos from your gallery or a text, and it\'s filed in seconds. The same link shows the phone steps.', '',
+  'Any questions, just reply.'].join('\n');
+/** Owner: the note holding the invite email (made from the default the first time). */
+function api_inviteNote() {
+  if (!isLicenceServer_()) throw new Error('Only the owner sends invites');
+  var p = props_(), id = p.getProperty('inviteNoteId');
+  if (id) { try { findNoteRow_(id); return { id: id }; } catch (e) {} }
+  var n = api_createNote('ArNote invite email', INVITE_DEFAULT_, []);
+  try { api_updateNote(n.id, { notebook: 'Cabinet' }); } catch (e) {}
+  p.setProperty('inviteNoteId', n.id);
+  return { id: n.id };
+}
+function inviteText_() {
+  var id = props_().getProperty('inviteNoteId');
+  if (id) {
+    try {
+      var row = findNoteRow_(id), docId = ss_().getSheetByName('Notes').getRange(row, NOTE_COLS.indexOf('docId') + 1).getValue();
+      var t = DocumentApp.openById(docId).getBody().getText().replace(/^\s*Notebook:[^\n]*\n?/, '');
+      if (t.trim()) return t;
+    } catch (e) {}
+  }
+  return INVITE_DEFAULT_;
+}
 function inviteEmail_(to, name, tok) {
-  var link = APP_URL + '#invite=' + tok, me = Session.getEffectiveUser().getEmail();
-  var first = String(name || '').split(/\s+/)[0];
-  var plain = 'Hi' + (first ? ' ' + first : '') + ',\n\n' +
-    'You\'re invited to ArNote, the notes-and-photos app I\'ve been building.\n\n' +
-    'What it does:\n' +
-    '- Notes, photos, receipts, business cards and documents in one place, organized by tags (Who / What / When / Where to start).\n' +
-    '- Everything lives in YOUR own Google Drive. I can\'t see your notes, and nothing is stored anywhere else.\n' +
-    '- Photos: one gallery you can drill into by tag or by place on a map.\n' +
-    '- Receipts: tag by job and expense category, mark billed / not billed, print a clean report.\n' +
-    '- Email in: forward any email (receipts, invoices, anything) to your ArNote address and it lands in your Inbox to tag.\n' +
-    '- Daily backup, and new features show up on their own.\n\n' +
-    'Start here (about 10 minutes, best on a computer; you\'ll need a Google account, a free Gmail is fine):\n' + link + '\n\n' +
-    'Then put it on your phone too. That\'s where it shines: snap a receipt or a business card, or send photos from your gallery or a text, and it\'s filed in seconds. The same link shows the phone steps.\n\n' +
-    'Any questions, just reply.\n';
+  var link = APP_URL + '#invite=' + tok, me = Session.getEffectiveUser().getEmail(), first = String(name || '').split(/\s+/)[0];
+  var t = inviteText_().replace(/\r/g, ''), subject = 'You\'re invited to ArNote';
+  var m = t.match(/^\s*Subject:\s*(.+)\n?/i); if (m) { subject = m[1].trim(); t = t.slice(m[0].length); }
+  t = t.replace(/^\s*\n/, '').replace(/[ \t]*\{first name\}/gi, first ? ' ' + first : '').replace(/\{from\}/gi, me);
+  if (!/\{invite button\}/i.test(t)) t += '\n\n{invite button}';
   var esc = function (x) { return String(x).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
-  var html = esc(plain).replace(esc(link), '<a href="' + esc(link) + '" style="display:inline-block;background:#2f6f4f;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:bold">Set up ArNote</a>').replace(/\n/g, '<br>');
-  GmailApp.sendEmail(to, 'You\'re invited to ArNote', plain, { htmlBody: '<div style="font:15px/1.5 sans-serif;max-width:560px">' + html + '</div>', replyTo: me });
+  var plain = t.replace(/\{invite button\}/gi, link);
+  var html = esc(t).replace(/\{invite button\}/gi, '<a href="' + esc(link) + '" style="display:inline-block;background:#2f6f4f;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:bold">Set up ArNote</a>').replace(/\n/g, '<br>');
+  GmailApp.sendEmail(to, subject, plain, { htmlBody: '<div style="font:15px/1.5 sans-serif;max-width:560px">' + html + '</div>', replyTo: me });
 }
 /** Public (no key): the invite page reads and accepts an invite by its token. Says nothing unless the token matches. */
 function inviteReq_(req) {
