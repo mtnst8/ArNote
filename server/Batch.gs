@@ -1971,7 +1971,7 @@ function api_receipts() {
     rows.push({ noteId: String(o.noteId), fileId: String(o.fileId), title: String(note.title), date: date, vendor: String(o.vendor || ''), total: total, tax: tax,
       card: card, pay: pay, checkNo: String(o.checkNo || ''), paid: paid,
       cols: sets.map(function (s) { return tags.filter(function (t) { return s[t]; }); }),
-      other: tags.filter(function (t) { return t !== 'Receipt' && !sets.some(function (s) { return s[t]; }); }),
+      other: tags.filter(function (t) { return t !== 'Receipt' && t.charAt(0) !== '@' && !sets.some(function (s) { return s[t]; }); }),
       billed: o.billed instanceof Date ? Utilities.formatDate(o.billed, tz, 'yyyy-MM-dd') : String(o.billed || '').slice(0, 10),
       check: !o.vendor || !date || total === null });
   });
