@@ -1,4 +1,4 @@
-var TAG_TREE = ["0|.What", "1|.Active Projects", "2|2015 Brewery Expansion", "3|3-phase power", "3|Utilities", "2|Canning Line", "1|.Biz Cards & Contacts", "1|.Boats", "2|2006 Corsair Mk II", "1|.Classes-Conf-Biz Trips", "2|2013 Breck Distilling Class", "2|2013 Distilling Conference", "2|2015 ABA - Barley & Malt", "2|2015 Craft Brewer's Conf (portland)", "2|2015 OSU Beer Quality", "2|2015 Tony Robbins Business", "2|2016 Cask Line Training", "2|2016 CBC - Philly", "2|2016 China Canning", "2|2016 Codi", "2|2016 OPTO22", "2|2019 Concrete Countertops", "1|.Equipment", "2|2001 New Holland Tractor", "2|2013 Kubota", "2|2017 Takeuchi", "2|91 Ford 3930", "2|CAT 262 Skid Steer", "2|CAT Forklift", "2|Chiller & Tubing", "3|Brewery Glycol", "2|JD 457", "2|John Deere Dozer", "2|NH T6.165", "2|Pumps", "2|Takeuchi TLV10", "1|.Inactive Projects", "2|2015 Brew Skies", "2|Craft Brewer's Guild", "2|Peabody Bottling", "1|.Personal", "2|Insurance", "2|People", "1|.Software", "1|.Vehicles", "2|2001 Ram 2500", "2|2001 Ram 2500 #2", "2|2006 Isuzu Box Truck", "2|2006 Ram 2500", "2|2011 BMW R1200GSA", "2|2016 KTM 500 EXC", "1|Brewing", "2|Beer Recipees", "2|Brewery Equipment", "3|Boiler", "2|Filtration", "2|Ideas", "3|Nitrogenating", "2|Ingredients/ Ideas", "1|Finances", "2|Crypto", "1|Future Businesses", "2|Shepherdstown", "1|General Business", "2|Importing", "1|Pictures", "0|.When", "1|!Daily", "1|1-Now", "1|2-Next", "1|2014", "1|2015", "1|3-Soon", "1|4-Later", "1|5-Someday", "1|6-Waiting", "1|7 - Completed", "0|.Where", "1|@128 Mingo", "1|@148 Douglas Rd", "1|@15209 GW HWY 26425", "1|@316 Spruce St Thomas", "1|@Brewskies Festival", "1|@Close Mountain Farm", "2|New Farm House", "1|@Deep Creek", "1|@IHT", "1|@IHT Granville", "1|@MSBC Morgantown", "1|@MSBC Thomas", "1|Sinclair Ridge", "0|.Who", "1|Brenda", "1|Dad", "1|Debbie", "1|Willie", "0|2018", "0|essxds", "0|Interests", "1|AAPS", "1|Distilling", "1|Evernote", "1|FCC Radio", "1|Hunting", "1|Misc Hobby", "1|Mushroom Hunting", "2|Morel", "1|Qualifications/Cards", "1|Recipes", "2|Sous Vide", "1|Reference", "2|Beer Recipes", "2|FEID", "2|Tools Tips Tricks", "0|Misc", "1|Gold", "0|Travel", "1|2015 China", "1|Antarctica", "1|Cuba", "1|Passport etc"].join('\n');
+var TAG_TREE = '';   // first-time tags now come from STARTER_TAGS_ (Batch.gs)
 /**
  * ArNote — personal note system (Google Apps Script, bound to the "ArNote" Sheet).
  * Notes are Google Docs in ArNote/Notes; attachments are files in ArNote/Attachments;
@@ -60,6 +60,7 @@ function ensureSheet_(name, cols) {
 }
 
 function seedTags_(sh) {
+  if (!TAG_TREE) return;
   var stack = [], rows = [];
   TAG_TREE.split('\n').forEach(function (line) {
     var i = line.indexOf('|'); var depth = +line.slice(0, i); var name = line.slice(i + 1);
@@ -70,10 +71,13 @@ function seedTags_(sh) {
 }
 
 function showAppLink() {
-  var url = ScriptApp.getService().getUrl();
-  var html = url ? '<p><a href="' + url + '" target="_blank">Open ArNote</a></p><p style="font:12px sans-serif">' + url + '</p>'
-                 : '<p>Not deployed yet: Deploy → New deployment → Web app.</p>';
-  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(html).setWidth(420).setHeight(120), 'ArNote');
+  var url = ScriptApp.getService().getUrl(), key = props_().getProperty('apiKey');
+  var esc = function (x) { return String(x).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+  var html = !url ? '<p style="font:14px sans-serif">Not published yet: <b>Deploy → New deployment</b> → ⚙ <b>Web app</b> → Execute as <b>Me</b>, Who has access <b>Anyone</b> → <b>Deploy</b>. Then choose ArNote → Open the app again.</p>'
+    : '<div style="font:14px sans-serif"><p>Open this <b>pairing link</b> on each phone and computer you\'ll use (email it to yourself). Keep it private — it is the key to your notes.</p>' +
+      '<textarea readonly style="width:100%;height:70px;font:12px monospace" onclick="this.select()">' + esc(pairingLink_(url, key)) + '</textarea>' +
+      '<p><a href="' + esc(pairingLink_(url, key)) + '" target="_blank">Open ArNote here</a></p></div>';
+  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(html).setWidth(460).setHeight(240), 'ArNote');
 }
 
 /* ---------------- sheet helpers ---------------- */

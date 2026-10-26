@@ -537,24 +537,51 @@ function licCheck_(req) {
     return { ok: u.status === 'active', status: u.status, plan: u.plan, release: +props_().getProperty('releaseN') || 0 };
   } finally { try { lock.releaseLock(); } catch (e) {} }
 }
-/* ---------- Updates: Brian releases a version; copies on the list install it themselves ----------
- * Uses the Apps Script API (each account turns it on once at script.google.com/home/usersettings). */
-function scriptApi_(method, path, body) {
-  var o = { method: method, headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true };
-  if (body) { o.contentType = 'application/json'; o.payload = JSON.stringify(body); }
-  var r = UrlFetchApp.fetch('https://script.googleapis.com/v1/' + path, o), c = r.getResponseCode(), t = r.getContentText();
-  if (c >= 300) {
-    if (/has not been used|is disabled|SERVICE_DISABLED|User has not enabled the Apps Script API/i.test(t)) throw new Error('Turn on "Google Apps Script API" at script.google.com/home/usersettings, then try again');
-    throw new Error('Apps Script API ' + c + ': ' + t.slice(0, 200));
+/* ---------- First-time setup of a friend's ArNote (called by the starter's "Set up ArNote") ---------- */
+var STARTER_TAGS_ = [['Who', '', 1], ['What', '', 2], ['When', '', 3], ['Where', '', 4], ['Receipt', '', 5], ['Business Card', '', 6], ['Document', '', 7], ['Photos', '', 8],
+  ['Family', 'Who', ''], ['Friends', 'Who', ''],
+  ['Projects', 'What', ''], ['Jobs', 'What', ''], ['Example Job', 'Jobs', ''], ['Vehicles', 'What', ''], ['Equipment', 'What', ''], ['Finances', 'What', ''], ['Taxes', 'What', ''],
+  ['Insurance', 'What', ''], ['Manuals & Warranties', 'What', ''], ['Recipes', 'What', ''],
+  ['Now', 'When', 1], ['Next', 'When', 2], ['Soon', 'When', 3], ['Later', 'When', 4], ['Someday', 'When', 5], ['Waiting', 'When', 6], ['Completed', 'When', 7],
+  ['Home', 'Where', ''], ['Work', 'Where', ''], ['Videos', 'Photos', ''],
+  ['Expense Categories', '', ''], ['Materials', 'Expense Categories', ''], ['Tools & Equipment', 'Expense Categories', ''], ['Fuel', 'Expense Categories', ''], ['Vehicle', 'Expense Categories', ''],
+  ['Meals', 'Expense Categories', ''], ['Office', 'Expense Categories', ''], ['Utilities', 'Expense Categories', ''], ['Subcontractors', 'Expense Categories', ''],
+  ['Fees & Permits', 'Expense Categories', ''], ['Other', 'Expense Categories', '']];
+function arnoteSetupAll_() {
+  var p = props_(), ss = SpreadsheetApp.getActiveSpreadsheet();
+  p.setProperty('sheetId', ss.getId());
+  var tags = ss.getSheetByName('Tags') || ss.insertSheet('Tags');
+  if (tags.getLastRow() < 2) {
+    tags.getRange(1, 1, 1, 3).setValues([['name', 'parent', 'order']]).setFontWeight('bold'); tags.setFrozenRows(1);
+    tags.getRange(2, 1, STARTER_TAGS_.length, 3).setValues(STARTER_TAGS_);
   }
-  return t ? JSON.parse(t) : {};
+  setup();
+  apiSetup();
+  installDropTrigger();
+  if (!p.getProperty('receiptCfg')) p.setProperty('receiptCfg', JSON.stringify({ cols: [{ name: 'Job', parent: 'Jobs' }, { name: 'Category', parent: 'Expense Categories' }], cards: {} }));
+  try { var cf = p.getProperty('codeFile'); if (cf) DriveApp.getFileById(cf).moveTo(DriveApp.getFolderById(p.getProperty('rootId'))); } catch (e) {}
+  noteUsed_(); try { licenceCheck_(); } catch (e) {}
+  return 'Your ArNote folder, index and starter tags are ready.\n\nLast step: click Deploy → New deployment → the gear ⚙ → Web app. Set "Execute as: Me" and "Who has access: Anyone", click Deploy and allow the permissions.\n\nThen choose ArNote → Open the app to get your pairing link for your phone and computer.';
 }
-/** Owner: publish the code as it is now as the next release. */
+
+/* ---------- Updates: Brian releases a version; copies on the list load it ----------
+ * A friend's ArNote is a small fixed starter (Loader.gs) that runs the ArNote code kept in a file in their own Drive.
+ * Brian's "Release this version" packages the server code from the GitHub repo (server/Code.gs + server/Batch.gs);
+ * each copy's daily check downloads a newer release into its code file. No republishing, no Google switches. */
+var RELEASE_SOURCES = ['server/Code.gs', 'server/Batch.gs'];
+function releaseRaw_(path) {
+  var tok = props_().getProperty('ghToken'), h = tok ? { Authorization: 'token ' + tok } : {};
+  var r = UrlFetchApp.fetch('https://raw.githubusercontent.com/mtnst8/ArNote/main/' + path + '?t=' + Date.now(), { headers: h, muteHttpExceptions: true });
+  if (r.getResponseCode() !== 200) throw new Error('Could not read ' + path + ' from GitHub (' + r.getResponseCode() + ')');
+  return r.getContentText();
+}
+/** Owner: publish the current server code (as kept in GitHub) as the next release. */
 function api_releaseNow(note) {
   if (!isLicenceServer_()) throw new Error('Only the owner can release');
-  var c = scriptApi_('get', 'projects/' + ScriptApp.getScriptId() + '/content');
+  var code = RELEASE_SOURCES.map(function (p) { return '/* ===== ' + p + ' ===== */\n' + releaseRaw_(p); }).join('\n\n');
+  if (code.indexOf('function doPost(') < 0 || code.indexOf('function setup(') < 0) throw new Error('The code from GitHub looks incomplete; nothing was released');
   var p = props_(), n = (+p.getProperty('releaseN') || 0) + 1, at = new Date().toISOString();
-  var rel = JSON.stringify({ n: n, at: at, note: String(note || '').slice(0, 200), files: (c.files || []).map(function (f) { return { name: f.name, type: f.type, source: f.source }; }) });
+  var rel = JSON.stringify({ n: n, at: at, note: String(note || '').slice(0, 200), code: code });
   var root = DriveApp.getFolderById(p.getProperty('rootId')), id = p.getProperty('releaseFile'), f = null;
   if (id) { try { f = DriveApp.getFileById(id); if (f.isTrashed()) f = null; } catch (e) { f = null; } }
   if (f) f.setContent(rel); else { f = root.createFile('ArNote release.json', rel, 'application/json'); p.setProperty('releaseFile', f.getId()); }
@@ -572,25 +599,21 @@ function releaseFor_(req) {
   var id = props_().getProperty('releaseFile'); if (!id) return null;
   return DriveApp.getFileById(id).getBlob().getDataAsString();
 }
-/** A copy: fetch the latest release from Brian's ArNote, install it into this project and republish the web app. */
+/** A copy: download the latest release into this ArNote's code file; the starter uses it from the next run. */
 function selfUpdate_() {
   if (isLicenceServer_()) return null;
   var p = props_(), r = UrlFetchApp.fetch(LICENCE_URL, { method: 'post', contentType: 'text/plain', muteHttpExceptions: true,
     payload: JSON.stringify({ lic: 'code', email: Session.getEffectiveUser().getEmail(), install: p.getProperty('installId') || '', build: +p.getProperty('releaseInstalled') || 0 }) });
   var body = (JSON.parse(r.getContentText()) || {}).result; if (!body) throw new Error('No update available for this account');
-  var rel = JSON.parse(body), id = ScriptApp.getScriptId();
+  var rel = JSON.parse(body);
   if (+rel.n <= (+p.getProperty('releaseInstalled') || 0)) return null;
-  var files = rel.files.map(function (f) {
-    if (f.type === 'JSON' && f.name === 'appsscript') { var m = JSON.parse(f.source); m.timeZone = Session.getScriptTimeZone(); return { name: f.name, type: f.type, source: JSON.stringify(m, null, 2) }; }
-    return f;
-  });
-  scriptApi_('put', 'projects/' + id + '/content', { files: files });
-  var ver = scriptApi_('post', 'projects/' + id + '/versions', { description: 'ArNote release ' + rel.n });
-  var dep = p.getProperty('deploymentId');
-  if (!dep) { (scriptApi_('get', 'projects/' + id + '/deployments').deployments || []).forEach(function (d) { if (!dep && (d.entryPoints || []).some(function (e) { return e.entryPointType === 'WEB_APP'; }) && d.deploymentConfig && d.deploymentConfig.versionNumber) dep = d.deploymentId; }); }
-  if (!dep) throw new Error('Could not find this ArNote\'s web app deployment');
-  scriptApi_('put', 'projects/' + id + '/deployments/' + dep, { deploymentConfig: { scriptId: id, versionNumber: ver.versionNumber, manifestFileName: 'appsscript', description: 'ArNote release ' + rel.n } });
-  p.setProperties({ deploymentId: dep, releaseInstalled: String(rel.n), updatedAt: new Date().toISOString(), updateErr: '' });
+  if (String(rel.code || '').indexOf('function doPost(') < 0) throw new Error('The update looks incomplete; kept the current version');
+  var id = p.getProperty('codeFile'), f = null;
+  if (id) { try { f = DriveApp.getFileById(id); if (f.isTrashed()) f = null; } catch (e) { f = null; } }
+  if (f) f.setContent(rel.code);
+  else { f = (p.getProperty('rootId') ? DriveApp.getFolderById(p.getProperty('rootId')) : DriveApp.getRootFolder()).createFile('ArNote code.js', rel.code, 'text/plain'); p.setProperty('codeFile', f.getId()); }
+  try { CacheService.getScriptCache().remove('arnote_code_n'); } catch (e) {}
+  p.setProperties({ releaseInstalled: String(rel.n), updatedAt: new Date().toISOString(), updateErr: '' });
   return rel.n;
 }
 function api_updateNow() { licenceCheck_(); var n = selfUpdate_(); return { updated: n, info: api_releaseInfo() }; }
