@@ -481,7 +481,9 @@ setInterval(function(){syncNow(false)},60000);
 function setTags(tags){
   S.tags=tags; S.children={}; S.parent={};
   tags.forEach(function(t){S.parent[t.name]=t.parent;(S.children[t.parent]=S.children[t.parent]||[]).push(t.name)});
-  Object.keys(S.children).forEach(function(k){S.children[k].sort(function(a,b){return a.localeCompare(b,undefined,{numeric:true})})});
+  var ord={}; tags.forEach(function(t){ord[t.name]=+t.order||0});      // pinned / hand-ordered first, then A–Z
+  Object.keys(S.children).forEach(function(k){S.children[k].sort(function(a,b){return (ord[a]||1e9)-(ord[b]||1e9)||a.localeCompare(b,undefined,{numeric:true})})});
+  S.tagOrd=ord;
 }
 function tagPath(t){var p=[],x=t,g=0;while(x&&g++<12){p.unshift(x);x=S.parent[x]}return p.join(' › ')}
 function descendants(t){var out=[t];(S.children[t]||[]).forEach(function(c){out=out.concat(descendants(c))});return out}
@@ -1148,7 +1150,7 @@ function drawTagTree(){
 function tagRow(t,d,state,extra){
   return '<div class="trow" data-tag="'+esc(t)+'" style="padding-left:'+(10+d*20)+'px">'+
     '<button class="tw'+(state?'':' leaf')+'" aria-label="expand">'+(state==='open'?'▾':'▸')+'</button>'+
-    '<span class="nm">'+esc(t)+extra+'</span><span class="c">'+tagCount(t)+'</span><button class="more" aria-label="tag actions">⋯</button></div>';
+    '<span class="nm">'+(!S.parent[t]&&(S.tagOrd||{})[t]?'<span title="Kept at the top" style="font-size:11px;margin-right:4px">📌</span>':'')+esc(t)+extra+'</span><span class="c">'+tagCount(t)+'</span><button class="more" aria-label="tag actions">⋯</button></div>';
 }
 function tagNotes(t){var set={};descendants(t).forEach(function(x){set[x]=1});
   return byRecent(S.notes.filter(function(n){return n.tags.some(function(g){return set[g]})}))}
@@ -1182,12 +1184,31 @@ function bindNewTag(after){
 function tagMenu(t,anchor){
   closeMenu();
   var m=document.createElement('div');m.className='menu';m.id='menu';
-  m.innerHTML='<button data-a="open">Show notes</button><button data-a="share">Share…</button><button data-a="sub">New sub-tag…</button><button data-a="rename">Rename / merge…</button><button data-a="move">Change parent tag…</button><button data-a="delete" style="color:var(--warn)">Delete tag…</button>';
+  m.innerHTML='<button data-a="open">Show notes</button><button data-a="share">Share…</button><button data-a="sub">New sub-tag…</button><button data-a="rename">Rename / merge…</button><button data-a="move">Change parent tag…</button>'+tagOrderItems(t)+'<button data-a="delete" style="color:var(--warn)">Delete tag…</button>';
   document.body.appendChild(m);
   var r=anchor.getBoundingClientRect();m.style.top=Math.min(r.bottom+4,window.innerHeight-200)+'px';m.style.left=Math.max(8,Math.min(r.right-170,window.innerWidth-180))+'px';
   m.onclick=function(e){var a=e.target.dataset.a;if(!a)return;closeMenu();
+    if(a==='pin'||a==='unpin'||a==='up'||a==='down'){tagOrderDo(t,a);return}
     if(a==='open')showTag(t); else if(a==='share')shareDialog(t); else if(a==='sub')tagDialog('new',t); else tagDialog(a,t)};
   setTimeout(function(){document.addEventListener('click',closeMenu,{once:true})},0);
+}
+/* tag order: pinned top-level tags come first (in your order); under a parent, ↑ ↓ set the order */
+function tagOrderItems(t){var p=S.parent[t]||'', pinned=!!(S.tagOrd||{})[t];
+  if(!p) return (pinned?'<button data-a="up">↑ Move up</button><button data-a="down">↓ Move down</button><button data-a="unpin">Unpin from top</button>':'<button data-a="pin">📌 Keep at top</button>');
+  return '<button data-a="up">↑ Move up</button><button data-a="down">↓ Move down</button>'}
+function tagOrderDo(t,a){
+  var p=S.parent[t]||'', sibs=(S.children[p]||[]).slice(), ord=S.tagOrd||{};
+  var list=p?sibs:sibs.filter(function(x){return ord[x]});                   // top level: only the pinned ones have an order
+  var i=list.indexOf(t);
+  if(a==='pin'&&i<0) list.push(t);
+  else if(a==='unpin') list=list.filter(function(x){return x!==t});
+  else if(a==='up'&&i>0){list.splice(i,1);list.splice(i-1,0,t)}
+  else if(a==='down'&&i>=0&&i<list.length-1){list.splice(i,1);list.splice(i+1,0,t)}
+  else return;
+  var pos={};list.forEach(function(x,k){pos[x]=k+1});
+  S.tags.forEach(function(x){if((S.parent[x.name]||'')===p)x.order=pos[x.name]||0});
+  setTags(S.tags); rerender();
+  call('api_tagOrder',p,list).catch(function(e){toast(e.message)});
 }
 function closeMenu(){var m=$('#menu');if(m)m.remove()}
 function parentOptions(exclude,sel){

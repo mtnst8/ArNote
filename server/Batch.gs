@@ -68,6 +68,18 @@ function api_batchTrash(ids) {
 
 /* ---- tag management ---- */
 
+/** Tag order (Tags sheet column C): at the top level a number = pinned to the top in that order; under a parent = manual order. Blank = alphabetical after. */
+function tagSheetOrder_() { var sh = ss_().getSheetByName('Tags'); if (String(sh.getRange(1, 3).getValue()) !== 'order') sh.getRange(1, 3).setValue('order').setFontWeight('bold'); return sh; }
+function api_tagOrder(parent, names) {
+  parent = String(parent || ''); var pos = {}; (names || []).forEach(function (n, i) { pos[String(n)] = i + 1; });
+  var sh = tagSheetOrder_(), n = sh.getLastRow() - 1; if (n < 1) return true;
+  var v = sh.getRange(2, 1, n, 3).getValues();
+  sh.getRange(2, 3, n, 1).setValues(v.map(function (r) { return [String(r[1] || '') === parent ? (pos[String(r[0])] || '') : r[2]]; }));
+  return true;
+}
+/** The tags ArNote makes for Google accounts (not to be mixed up with tags that happen to start with @). */
+function acctTags_() { var s = {}, m = accountMap_(); Object.keys(m).forEach(function (e) { if (m[e]) s[m[e]] = 1; }); return s; }
+
 function api_renameTag(oldName, newName) {
   newName = String(newName || '').trim(); if (!newName || newName === oldName) return false;
   var tagSh = ss_().getSheetByName('Tags'), tags = tagSh.getDataRange().getValues();
@@ -87,7 +99,7 @@ function api_moveTag(name, parent) {
   // refuse to move a tag under its own descendant
   var p = parent, guard = 0, parentOf = {}; tags.forEach(function (r) { parentOf[String(r[0])] = String(r[1]); });
   while (p && guard++ < 20) { if (p === name) throw new Error('Cannot move a tag inside itself'); p = parentOf[p]; }
-  for (var i = 1; i < tags.length; i++) if (String(tags[i][0]) === name) { tagSh.getRange(i + 1, 2).setValue(parent || ''); return true; }
+  for (var i = 1; i < tags.length; i++) if (String(tags[i][0]) === name) { tagSh.getRange(i + 1, 2, 1, 2).setValues([[parent || '', '']]); return true; }   // a new parent: its old place in the order no longer applies
   tagSh.appendRow([name, parent || '']);
   return true;
 }
@@ -1001,6 +1013,9 @@ function tagRenamed_(oldName, newName) {
   var s = shares_(), ch2 = false;
   s.forEach(function (x) { if (x.tag === oldName) { x.tag = newName; ch2 = true; } });
   if (ch2) saveShares_(s);
+  var rc = receiptCfg_(), ch3 = false;
+  rc.cols.forEach(function (c) { if (c.parent === oldName) { c.parent = newName; ch3 = true; } });
+  if (ch3) props_().setProperty('receiptCfg', JSON.stringify(rc));
 }
 function tagDeleted_(name) {
   retagPhotos_(function (tg) { return tg.filter(function (g) { return g !== name; }); });
@@ -1972,7 +1987,7 @@ function scanQueue_(budgetMs) {
 /** Receipts sheet "category" = the note's tags (other than Receipt), so tagging the note in the Inbox fills it in. */
 function refreshReceiptCategories_() {
   var sh = ss_().getSheetByName('Receipts'); if (!sh || sh.getLastRow() < 2) return;
-  var tags = {}; readTable_('Notes').forEach(function (n) { tags[n.id] = splitTags_(n.tags).filter(function (t) { return t !== 'Receipt' && t.charAt(0) !== '@'; }).join(', '); });
+  var acct = acctTags_(), tags = {}; readTable_('Notes').forEach(function (n) { tags[n.id] = splitTags_(n.tags).filter(function (t) { return t !== 'Receipt' && !acct[t]; }).join(', '); });
   var c = RECEIPT_COLS.indexOf('category'), k = RECEIPT_COLS.indexOf('noteId');
   var rng = sh.getRange(2, 1, sh.getLastRow() - 1, RECEIPT_COLS.length), v = rng.getValues(), out = [], ch = false;
   v.forEach(function (r) { var t = tags[r[k]]; if (t === undefined) t = r[c]; if (t !== r[c]) ch = true; out.push([t]); });
@@ -2050,7 +2065,7 @@ function buildReceiptReport_(force) {
 
 /** Every receipt with its tags sorted into the report columns. */
 function api_receipts() {
-  var cfg = receiptCfg_(), kids = {}, tz = Session.getScriptTimeZone(), sh = receiptSheet_();
+  var cfg = receiptCfg_(), kids = {}, tz = Session.getScriptTimeZone(), sh = receiptSheet_(), acct = acctTags_();
   readTable_('Tags').forEach(function (t) { var p = String(t.parent || ''); (kids[p] = kids[p] || []).push(String(t.name)); });
   var sets = cfg.cols.map(function (c) { var s = {}; (function walk(x) { (kids[x] || []).forEach(function (k) { s[k] = 1; walk(k); }); })(c.parent); return s; });
   var notes = {}; readTable_('Notes').forEach(function (n) { notes[n.id] = n; });
@@ -2066,7 +2081,7 @@ function api_receipts() {
     rows.push({ noteId: String(o.noteId), fileId: String(o.fileId), title: String(note.title), date: date, vendor: String(o.vendor || ''), total: total, tax: tax,
       card: card, pay: pay, checkNo: String(o.checkNo || ''), paid: paid,
       cols: sets.map(function (s) { return tags.filter(function (t) { return s[t]; }); }),
-      other: tags.filter(function (t) { return t !== 'Receipt' && t.charAt(0) !== '@' && !sets.some(function (s) { return s[t]; }); }),
+      other: tags.filter(function (t) { return t !== 'Receipt' && !acct[t] && !sets.some(function (s) { return s[t]; }); }),
       kind: String(o.kind || 'receipt'),
       billed: o.billed instanceof Date ? Utilities.formatDate(o.billed, tz, 'yyyy-MM-dd') : String(o.billed || '').slice(0, 10),
       check: !o.vendor || !date || total === null });
