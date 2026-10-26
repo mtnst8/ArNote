@@ -436,6 +436,10 @@ function doPost(e) {
       out = { ok: true, result: shareDispatch_(req.s, String(req.fn || ''), Array.isArray(req.a) ? req.a : []) };
       return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
     }
+    if (req.lic === 'code') {                      // a copy on the list fetching the released code
+      out = { ok: true, result: isLicenceServer_() ? releaseFor_(req) : null };
+      return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+    }
     if (req.lic === 'check') {                     // another ArNote checking in with Brian's (no key: it only says yes/no)
       out = { ok: true, result: isLicenceServer_() ? licCheck_(req) : { ok: false, reason: 'not a licence server' } };
       return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
@@ -530,9 +534,67 @@ function licCheck_(req) {
     if (!u) return { ok: false, status: 'unknown' };
     var used = /^\d{4}-\d\d-\d\d$/.test(String(req.lastUsed || '')) ? String(req.lastUsed) : '';
     t.sh.getRange(u.row, 6, 1, 4).setValues([[used && used > u.lastUsed ? used : u.lastUsed, today_(), String(+req.build || ''), String(req.install || '').slice(0, 60)]]);
-    return { ok: u.status === 'active', status: u.status, plan: u.plan };
+    return { ok: u.status === 'active', status: u.status, plan: u.plan, release: +props_().getProperty('releaseN') || 0 };
   } finally { try { lock.releaseLock(); } catch (e) {} }
 }
+/* ---------- Updates: Brian releases a version; copies on the list install it themselves ----------
+ * Uses the Apps Script API (each account turns it on once at script.google.com/home/usersettings). */
+function scriptApi_(method, path, body) {
+  var o = { method: method, headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true };
+  if (body) { o.contentType = 'application/json'; o.payload = JSON.stringify(body); }
+  var r = UrlFetchApp.fetch('https://script.googleapis.com/v1/' + path, o), c = r.getResponseCode(), t = r.getContentText();
+  if (c >= 300) {
+    if (/has not been used|is disabled|SERVICE_DISABLED|User has not enabled the Apps Script API/i.test(t)) throw new Error('Turn on "Google Apps Script API" at script.google.com/home/usersettings, then try again');
+    throw new Error('Apps Script API ' + c + ': ' + t.slice(0, 200));
+  }
+  return t ? JSON.parse(t) : {};
+}
+/** Owner: publish the code as it is now as the next release. */
+function api_releaseNow(note) {
+  if (!isLicenceServer_()) throw new Error('Only the owner can release');
+  var c = scriptApi_('get', 'projects/' + ScriptApp.getScriptId() + '/content');
+  var p = props_(), n = (+p.getProperty('releaseN') || 0) + 1, at = new Date().toISOString();
+  var rel = JSON.stringify({ n: n, at: at, note: String(note || '').slice(0, 200), files: (c.files || []).map(function (f) { return { name: f.name, type: f.type, source: f.source }; }) });
+  var root = DriveApp.getFolderById(p.getProperty('rootId')), id = p.getProperty('releaseFile'), f = null;
+  if (id) { try { f = DriveApp.getFileById(id); if (f.isTrashed()) f = null; } catch (e) { f = null; } }
+  if (f) f.setContent(rel); else { f = root.createFile('ArNote release.json', rel, 'application/json'); p.setProperty('releaseFile', f.getId()); }
+  p.setProperties({ releaseN: String(n), releaseAt: at, releaseNote: String(note || '').slice(0, 200) });
+  return api_releaseInfo();
+}
+function api_releaseInfo() {
+  var p = props_();
+  if (isLicenceServer_()) return { owner: true, n: +p.getProperty('releaseN') || 0, at: p.getProperty('releaseAt') || '', note: p.getProperty('releaseNote') || '' };
+  var l = {}; try { l = JSON.parse(p.getProperty('licence') || '{}'); } catch (e) {}
+  return { owner: false, installed: +p.getProperty('releaseInstalled') || 0, latest: +l.release || 0, at: p.getProperty('updatedAt') || '', error: p.getProperty('updateErr') || '' };
+}
+function releaseFor_(req) {
+  var l = licCheck_(req); if (!l.ok) return null;
+  var id = props_().getProperty('releaseFile'); if (!id) return null;
+  return DriveApp.getFileById(id).getBlob().getDataAsString();
+}
+/** A copy: fetch the latest release from Brian's ArNote, install it into this project and republish the web app. */
+function selfUpdate_() {
+  if (isLicenceServer_()) return null;
+  var p = props_(), r = UrlFetchApp.fetch(LICENCE_URL, { method: 'post', contentType: 'text/plain', muteHttpExceptions: true,
+    payload: JSON.stringify({ lic: 'code', email: Session.getEffectiveUser().getEmail(), install: p.getProperty('installId') || '', build: +p.getProperty('releaseInstalled') || 0 }) });
+  var body = (JSON.parse(r.getContentText()) || {}).result; if (!body) throw new Error('No update available for this account');
+  var rel = JSON.parse(body), id = ScriptApp.getScriptId();
+  if (+rel.n <= (+p.getProperty('releaseInstalled') || 0)) return null;
+  var files = rel.files.map(function (f) {
+    if (f.type === 'JSON' && f.name === 'appsscript') { var m = JSON.parse(f.source); m.timeZone = Session.getScriptTimeZone(); return { name: f.name, type: f.type, source: JSON.stringify(m, null, 2) }; }
+    return f;
+  });
+  scriptApi_('put', 'projects/' + id + '/content', { files: files });
+  var ver = scriptApi_('post', 'projects/' + id + '/versions', { description: 'ArNote release ' + rel.n });
+  var dep = p.getProperty('deploymentId');
+  if (!dep) { (scriptApi_('get', 'projects/' + id + '/deployments').deployments || []).forEach(function (d) { if (!dep && (d.entryPoints || []).some(function (e) { return e.entryPointType === 'WEB_APP'; }) && d.deploymentConfig && d.deploymentConfig.versionNumber) dep = d.deploymentId; }); }
+  if (!dep) throw new Error('Could not find this ArNote\'s web app deployment');
+  scriptApi_('put', 'projects/' + id + '/deployments/' + dep, { deploymentConfig: { scriptId: id, versionNumber: ver.versionNumber, manifestFileName: 'appsscript', description: 'ArNote release ' + rel.n } });
+  p.setProperties({ deploymentId: dep, releaseInstalled: String(rel.n), updatedAt: new Date().toISOString(), updateErr: '' });
+  return rel.n;
+}
+function api_updateNow() { licenceCheck_(); var n = selfUpdate_(); return { updated: n, info: api_releaseInfo() }; }
+
 /** This copy asks Brian's ArNote whether it may run. Stored with the time; failures keep the last answer. */
 function licenceCheck_() {
   if (isLicenceServer_()) return { ok: true, owner: true };
@@ -540,7 +602,7 @@ function licenceCheck_() {
   var res = null;
   try {
     var r = UrlFetchApp.fetch(LICENCE_URL, { method: 'post', contentType: 'text/plain', muteHttpExceptions: true,
-      payload: JSON.stringify({ lic: 'check', email: Session.getEffectiveUser().getEmail(), install: inst, build: ARNOTE_BUILD, lastUsed: p.getProperty('lastUsed') || '' }) });
+      payload: JSON.stringify({ lic: 'check', email: Session.getEffectiveUser().getEmail(), install: inst, build: +p.getProperty('releaseInstalled') || 0, lastUsed: p.getProperty('lastUsed') || '' }) });
     res = (JSON.parse(r.getContentText()) || {}).result;
   } catch (e) { Logger.log('Licence check: ' + e); }
   if (res && typeof res.ok === 'boolean') { res.at = new Date().toISOString(); p.setProperty('licence', JSON.stringify(res)); return res; }
@@ -549,7 +611,8 @@ function licenceCheck_() {
 function licenceDaily_() {
   if (isLicenceServer_()) return;
   var l = {}; try { l = JSON.parse(props_().getProperty('licence') || '{}'); } catch (e) {}
-  if (!l.at || Date.now() - new Date(l.at).getTime() > 20 * 3600e3) licenceCheck_();
+  if (!l.at || Date.now() - new Date(l.at).getTime() > 20 * 3600e3) l = licenceCheck_() || l;
+  if (l && l.ok && +l.release > (+props_().getProperty('releaseInstalled') || 0)) { try { selfUpdate_(); } catch (e) { props_().setProperty('updateErr', String(e.message || e)); } }
 }
 /** ok unless Brian's list says removed/unknown. Never checked yet → check now. Can't reach Brian's for 14 days → still ok (grace). */
 function licenceState_() {
