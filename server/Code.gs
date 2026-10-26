@@ -70,14 +70,30 @@ function seedTags_(sh) {
   sh.getRange(2, 1, rows.length, 2).setValues(rows);
 }
 
+/* "Open the app": shows the pairing link. Google doesn't reliably tell a script its own published address
+ * (it can give a different one, e.g. with /a/yourdomain.com/), so the first time we ask for it once, test it, and remember it. */
+var WEBAPP_URL_RE_ = /^https:\/\/script\.google\.com\/(a\/[^\/]+\/)?macros\/s\/[A-Za-z0-9_-]{20,}\/exec$/;
+function api_setAppUrl(url) {
+  url = String(url || '').trim();
+  if (!WEBAPP_URL_RE_.test(url)) throw new Error('That isn\'t a web app address');
+  props_().setProperty('appUrl', url);
+  return true;
+}
 function showAppLink() {
-  var url = ScriptApp.getService().getUrl(), key = props_().getProperty('apiKey');
-  var esc = function (x) { return String(x).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
-  var html = !url ? '<p style="font:14px sans-serif">Not published yet: <b>Deploy → New deployment</b> → ⚙ <b>Web app</b> → Execute as <b>Me</b>, Who has access <b>Anyone</b> → <b>Deploy</b>. Then choose ArNote → Open the app again.</p>'
-    : '<div style="font:14px sans-serif"><p>Open this <b>pairing link</b> on each phone and computer you\'ll use (email it to yourself). Keep it private — it is the key to your notes.</p>' +
-      '<textarea readonly style="width:100%;height:70px;font:12px monospace" onclick="this.select()">' + esc(pairingLink_(url, key)) + '</textarea>' +
-      '<p><a href="' + esc(pairingLink_(url, key)) + '" target="_blank">Open ArNote here</a></p></div>';
-  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(html).setWidth(460).setHeight(240), 'ArNote');
+  var url = props_().getProperty('appUrl') || '', key = props_().getProperty('apiKey') || '';
+  var html = '<div style="font:14px sans-serif" id="w"></div><script>' +
+    'var KEY=' + JSON.stringify(key) + ',APP=' + JSON.stringify(APP_URL) + ',URL0=' + JSON.stringify(url) + ',RE=' + WEBAPP_URL_RE_.toString() + ';' +
+    'function esc(x){return String(x).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c]})}' +
+    'function link(u){return APP+"#pair="+btoa(u+"|"+KEY).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/,"")}' +
+    'function call(u,fn,a){return fetch(u,{method:"POST",body:JSON.stringify({k:KEY,fn:fn,a:a||[]})}).then(function(r){return r.text()}).then(function(t){var j;try{j=JSON.parse(t)}catch(e){throw new Error("no ArNote at that address")}if(!j.ok)throw new Error(j.error);return j.result})}' +
+    'function show(u){var l=link(u);document.getElementById("w").innerHTML="<p>Open this <b>pairing link</b> on each phone and computer you\'ll use (email it to yourself). Keep it private \\u2014 it is the key to your notes.</p>' +
+      '<textarea readonly style=\\"width:100%;height:70px;font:12px monospace\\" onclick=\\"this.select()\\">"+esc(l)+"</textarea><p><a href=\\""+esc(l)+"\\" target=\\"_blank\\">Open ArNote here</a> &nbsp; <a href=\\"#\\" onclick=\\"ask(\'\');return false\\" style=\\"font-size:12px;color:#666\\">change server address</a></p>"}' +
+    'function ask(msg){document.getElementById("w").innerHTML="<p><b>One-time step:</b> paste your ArNote web app address.</p><p style=\\"font-size:13px;color:#444\\">Find it: <b>Extensions \\u2192 Apps Script \\u2192 Deploy \\u2192 Manage deployments</b>, then click <b>Copy</b> under Web app URL. (Not published yet? In that window use <b>Deploy \\u2192 New deployment</b> \\u2192 \\u2699 <b>Web app</b>, Execute as <b>Me</b>, Who has access <b>Anyone</b>.)</p>' +
+      '<input id=\\"u\\" style=\\"width:100%;font:12px monospace;padding:6px\\" placeholder=\\"https://script.google.com/macros/s/\\u2026/exec\\"><p><button id=\\"b\\" style=\\"padding:6px 14px\\">Get my pairing link</button> <span id=\\"m\\" style=\\"color:#b00\\">"+esc(msg||"")+"</span></p>";' +
+      'document.getElementById("b").onclick=function(){var u=document.getElementById("u").value.trim(),m=document.getElementById("m");if(!RE.test(u)){m.textContent="That doesn\'t look like a web app address (it ends in /exec).";return}' +
+      'm.style.color="#666";m.textContent="Checking\\u2026";call(u,"api_appInfo").then(function(){return call(u,"api_setAppUrl",[u])}).then(function(){show(u)}).catch(function(e){m.style.color="#b00";m.textContent="Couldn\'t reach ArNote there: "+e.message+". Check it is published for Anyone."})}}' +
+    'if(URL0)show(URL0);else ask("");</script>';
+  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(html).setWidth(480).setHeight(280), 'ArNote');
 }
 
 /* ---------------- sheet helpers ---------------- */

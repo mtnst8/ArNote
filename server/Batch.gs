@@ -561,7 +561,7 @@ function arnoteSetupAll_() {
   if (!p.getProperty('receiptCfg')) p.setProperty('receiptCfg', JSON.stringify({ cols: [{ name: 'Job', parent: 'Jobs' }, { name: 'Category', parent: 'Expense Categories' }], cards: {} }));
   try { var cf = p.getProperty('codeFile'); if (cf) DriveApp.getFileById(cf).moveTo(DriveApp.getFolderById(p.getProperty('rootId'))); } catch (e) {}
   noteUsed_(); try { licenceCheck_(); } catch (e) {}
-  return 'Your ArNote folder, index and starter tags are ready.\n\nLast step (once): in this spreadsheet choose Extensions → Apps Script. In the window that opens click Deploy (top right) → New deployment → the gear ⚙ → Web app. Set "Execute as: Me" and "Who has access: Anyone", click Deploy and allow the permissions.\n\nThen come back here and choose ArNote → Open the app to get your pairing link for your phone and computer.';
+  return 'Your ArNote folder, index and starter tags are ready.\n\nLast step (once): in this spreadsheet choose Extensions → Apps Script. In the window that opens click Deploy (top right) → New deployment → the gear ⚙ → Web app. Set "Execute as: Me" and "Who has access: Anyone", click Deploy and allow the permissions, then click Copy under "Web app URL".\n\nThen come back here, choose ArNote → Open the app and paste that address. You'll get your pairing link for your phone and computer.';
 }
 
 /* ---------- Updates: Brian releases a version; copies on the list load it ----------
