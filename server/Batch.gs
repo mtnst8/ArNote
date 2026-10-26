@@ -2074,6 +2074,19 @@ function api_receipts() {
   return { cols: cfg.cols, cards: cfg.cards, seenCards: Object.keys(seenCards).sort(), rows: rows, url: ss_().getUrl() + '#gid=' + reportSheet_().getSheetId() };
 }
 
+/** Not a receipt after all: drop its row from Receipts and take the Receipt tag off the note (the note stays). */
+function api_receiptRemove(noteIds) {
+  var want = {}; (noteIds || []).forEach(function (id) { want[String(id)] = 1; });
+  var lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    var sh = receiptSheet_(), n = sh.getLastRow() - 1, k = RECEIPT_COLS.indexOf('noteId'), gone = 0;
+    if (n > 0) { var ids = sh.getRange(2, k + 1, n, 1).getValues(); for (var i = ids.length - 1; i >= 0; i--) if (want[String(ids[i][0])]) { sh.deleteRow(i + 2); gone++; } }
+  } finally { lock.releaseLock(); }
+  api_batchUpdate(Object.keys(want), { removeTags: ['Receipt'] });
+  try { buildReceiptReport_(); } catch (e) {}
+  return gone;
+}
+
 /** Mark receipts billed to the customer (date = today) or not billed (on = false). */
 function api_receiptBilled(noteIds, on) {
   var lock = LockService.getScriptLock(); lock.waitLock(20000);
