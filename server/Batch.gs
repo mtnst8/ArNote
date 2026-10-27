@@ -735,21 +735,38 @@ function parseReleases_(t) {
 /** After a release: the draft moves under "Release N · date"; "Next release" starts empty. */
 function rotateReleases_(n, note) {
   api_adminNote('releases');
-  var docId = adminDocId_('releases'), r = parseReleases_(releasesText_());
+  var r = parseReleases_(releasesText_());
   var title = 'Release ' + n + ' · ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MMM d, yyyy');
+  r.history = r.history.filter(function (h) { return h.n !== n; });
   r.history.unshift({ n: n, title: title, text: String(note || '').trim() });
-  var doc = DocumentApp.openById(docId), body = doc.getBody(), H = DocumentApp.ParagraphHeading;
-  var keep = body.getChild(0); while (body.getNumChildren() > 1) body.removeChild(body.getChild(1));
-  if (!(keep.getType() === DocumentApp.ElementType.PARAGRAPH && /^Notebook:/.test(keep.asParagraph().getText()))) keep.asParagraph().setText(headerLine_('Cabinet', []));
+  writeReleasesDoc_('', r.history);
+  return r.history.slice(0, 12);
+}
+/** Rewrite the release-notes note: header line, "Next release" + draft lines, then each release. (Docs won't delete a section's last
+ * paragraph, so the body is cleared and rebuilt rather than pruned.) */
+function writeReleasesDoc_(draft, history) {
+  var doc = DocumentApp.openById(adminDocId_('releases')), body = doc.getBody(), H = DocumentApp.ParagraphHeading;
+  body.clear();
+  body.getChild(0).asParagraph().setText(headerLine_('Cabinet', [])); body.getChild(0).asParagraph().setHeading(H.NORMAL);
   body.appendParagraph('Next release').setHeading(H.HEADING2);
-  body.appendParagraph('');
-  r.history.forEach(function (h) {
+  String(draft || '').split('\n').filter(function (l) { return l.trim(); }).forEach(function (l) { body.appendParagraph(l).setHeading(H.NORMAL); });
+  body.appendParagraph('').setHeading(H.NORMAL);
+  history.forEach(function (h) {
     body.appendParagraph(h.title).setHeading(H.HEADING3);
-    (h.text || '').split('\n').forEach(function (l) { body.appendParagraph(l).setHeading(H.NORMAL); });
+    String(h.text || '').split('\n').forEach(function (l) { body.appendParagraph(l).setHeading(H.NORMAL); });
     body.appendParagraph('').setHeading(H.NORMAL);
   });
   doc.saveAndClose();
-  return r.history.slice(0, 12);
+}
+/** Owner: rebuild the release history from the last published release (it carries the notes of the last 12 releases). */
+function api_releasesRepair() {
+  if (!isLicenceServer_()) throw new Error('Only the owner can do this');
+  var rel = JSON.parse(DriveApp.getFileById(props_().getProperty('releaseFile')).getBlob().getDataAsString());
+  var hist = rel.notes || [{ n: rel.n, title: 'Release ' + rel.n, text: rel.note || '' }];
+  var known = {}; hist.forEach(function (h) { String(h.text || '').split('\n').forEach(function (l) { if (l.trim()) known[l.trim()] = 1; }); });
+  var draft = parseReleases_(releasesText_()).draft.split('\n').filter(function (l) { return l.trim() && !known[l.trim()]; }).join('\n');
+  writeReleasesDoc_(draft, hist);
+  return { releases: hist.map(function (h) { return h.n; }), draft: draft };
 }
 
 /* ---------- Export notes for AI: one Markdown file ---------- */
