@@ -653,6 +653,7 @@ function cleanHtml_(h) {
       if (close) { out.push(stack.pop() || ''); return m; }
       var cls = ((attrs.match(/class="([^"]*)"/) || [])[1] || '').split(/\s+/), b = false, it = false;
       cls.forEach(function (c) { if (fmt[c]) { b = b || fmt[c].b; it = it || fmt[c].i; } });
+      var sty = (attrs.match(/style="([^"]*)"/) || [])[1] || ''; if (/font-weight:\s*(700|bold)/.test(sty)) b = true; if (/font-style:\s*italic/.test(sty)) it = true;
       out.push((b ? '<b>' : '') + (it ? '<i>' : '')); stack.push((it ? '</i>' : '') + (b ? '</b>' : '')); return m;
     }
     if (/^(p|br|ol|ul|li|h1|h2|h3|h4|b|i|strong|em)$/.test(tag)) {
