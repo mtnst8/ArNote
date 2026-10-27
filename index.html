@@ -44,6 +44,7 @@ h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--mute)
 .rcn .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rcn .am{font-variant-numeric:tabular-nums;white-space:nowrap}
 .rcn.l2{margin-left:14px;font-size:13px}.ub2{display:block;font-size:11px;color:var(--warn)}
 .rccr{margin:0 0 8px;font-size:15px}.rccr button{background:none;border:none;color:var(--acc);font:inherit;cursor:pointer;padding:0}
+.guide h2,.guide h3{font-size:15px;margin:14px 0 4px}.guide ul,.guide ol{padding-left:20px;margin:4px 0}.guide li{margin:2px 0}.guide p{margin:6px 0}
 .rcselbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 10px;margin:0 0 8px;border-radius:10px;background:var(--card);border:1px solid var(--acc)}
 .rcpv{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
 .rcpv img{width:220px;max-width:100%;max-height:320px;object-fit:contain;border-radius:8px;background:#f2f2f2}
@@ -359,6 +360,7 @@ body.guest #actbar,body.guest .row .nb{display:none!important}
   <button class="btn small" id="aUnstar">☆ Remove bookmark</button>
   <button class="btn small" id="aMerge">⇲ Merge</button>
   <button class="btn small" id="aPrint">🖨 Print</button>
+  <button class="btn small" id="aAI" title="One Markdown file of the selected notes that Claude, ChatGPT or Gemini can read">✦ Export for AI</button>
   <button class="btn small danger" id="aDel">Delete</button>
   <button class="btn small" id="aDone">Clear</button>
 </div></div>
@@ -574,6 +576,7 @@ $('#aDel').onclick=function(){
   trashLater(ids,'Deleted '+ids.length+' note'+(ids.length>1?'s':'')); S.sel={}; refreshInboxCount(); rerender(); paintSel();
 };
 $('#aPrint').onclick=function(){printNotes(Object.keys(S.sel))};
+$('#aAI').onclick=function(){exportForAI(Object.keys(S.sel))};
 $('#aMerge').onclick=function(){
   var ids=Object.keys(S.sel).filter(function(id){return S.byId[id]});
   if(ids.length<2){toast('Select two or more notes to merge');return}
@@ -1058,6 +1061,49 @@ function linkDialog(){
 }
 function load_all(){return load()}
 /* ---------- print ---------- */
+/** Selected notes as one Markdown file an AI assistant can read: download it or copy it. */
+function exportForAI(ids){
+  ids=ids.filter(function(id){return S.byId[id]}); if(!ids.length){toast('Select some notes first');return}
+  if(ids.length>200){toast('Up to 200 notes at a time');return}
+  modal('Export '+ids.length+' note'+(ids.length>1?'s':'')+' for AI','One Markdown file: titles, tags, dates and full text, with links to attachments.','<div id="aiw"><p class="muted">Reading notes… <span id="aiN">0</span> of '+ids.length+'</p></div>','<span class="grow"></span><button class="btn" id="aiC">Close</button>');
+  $('#aiC').onclick=closeModal;
+  var parts=[],i=0,chunk=20;
+  (function next(){
+    if(i>=ids.length) return done();
+    call('api_exportMarkdown',ids.slice(i,i+chunk)).then(function(md){parts.push(md);i+=chunk;var n=$('#aiN');if(n)n.textContent=Math.min(i,ids.length);next()}).catch(function(e){var w=$('#aiw');if(w)w.innerHTML='<p class="err">'+esc(e.message)+'</p>'});
+  })();
+  function done(){
+    var head='# ArNote export: '+ids.length+' note'+(ids.length>1?'s':'')+' ('+today()+')\n\nExported from ArNote, a notes app that keeps notes as Google Docs organized by tags. Each note below starts with its title, then its tags, notebook (Inbox = not yet filed, Cabinet = filed) and dates, then its full text.\n\n---\n\n';
+    var md=head+parts.join('\n'), w=$('#aiw'); if(!w) return;
+    var kb=Math.round(new Blob([md]).size/1024);
+    w.innerHTML='<p style="margin:0 0 8px">Ready: '+kb+' KB. Attach the file to a chat with Claude, ChatGPT or Gemini, or paste the text, then ask your question.</p>'+
+      '<div class="setrow"><button class="btn primary" id="aiDl">⇩ Download .md</button><button class="btn" id="aiCp">Copy text</button></div>'+
+      '<textarea readonly id="aiT" style="width:100%;height:180px;margin-top:8px;font:12px monospace;box-sizing:border-box"></textarea>';
+    $('#aiT').value=md;
+    $('#aiDl').onclick=function(){var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([md],{type:'text/markdown'}));a.download='ArNote export '+today()+'.md';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1000)};
+    $('#aiCp').onclick=function(){var t=$('#aiT');(navigator.clipboard?navigator.clipboard.writeText(md):Promise.reject()).then(function(){toast('Copied: paste it into your AI chat')}).catch(function(){t.focus();t.select();try{document.execCommand('copy');toast('Copied')}catch(e){toast('Select the text and copy it')}})};
+  }
+}
+/* ---------- help text kept by Brian as notes (read from his ArNote; public how-to) ---------- */
+function adminDoc(kind){return invCall({inv:'doc',kind:kind})}
+function showGuide(first){
+  modal(first?'Welcome to ArNote':'Getting started',first?'A two-minute tour. You can open it again any time under Settings → Getting started.':'','<div class="guide" id="gdw"><p class="muted">Loading…</p></div>','<span class="grow"></span><button class="btn primary" id="gdC">'+(first?'Let\'s go':'Close')+'</button>');
+  $('#gdC').onclick=closeModal;
+  adminDoc('guide').then(function(r){var w=$('#gdw');if(w)w.innerHTML=(r&&r.html)||'<p>Not available right now.</p>'}).catch(function(e){var w=$('#gdw');if(w)w.innerHTML='<p class="err">'+esc(e.message)+'</p>'});
+}
+/** After an update: what changed since this device last looked (once per device). */
+function whatsNew(rel,notes){
+  if(!rel||(S.lic&&S.lic.owner)) return;
+  var k='arnote.seenRel',seen=0;try{seen=+localStorage.getItem(k)||0}catch(e){}
+  var mark=function(){try{localStorage.setItem(k,String(rel))}catch(e){}};
+  if(!seen||S.justPaired){mark();return}
+  if(rel<=seen) return;
+  var list=(notes||[]).filter(function(x){return +x.n>seen&&String(x.text||'').trim()}).sort(function(a,b){return b.n-a.n});
+  mark(); if(!list.length) return;
+  var md=function(t){var h='',ul=false;esc(t).split('\n').forEach(function(l){var m=l.match(/^\s*[-•*]\s+(.*)$/);if(m){if(!ul){h+='<ul>';ul=true}h+='<li>'+m[1]+'</li>'}else{if(ul){h+='</ul>';ul=false}if(l.trim())h+='<p>'+l+'</p>'}});return h+(ul?'</ul>':'')};
+  modal('What\'s new in ArNote','','<div class="guide">'+list.map(function(x){return '<h3>'+esc(x.title||('Release '+x.n))+'</h3>'+md(x.text)}).join('')+'</div>','<span class="grow"></span><button class="btn primary" id="wnC">Got it</button>');
+  $('#wnC').onclick=closeModal;
+}
 function printNotes(ids){
   ids=ids.filter(function(id){return S.byId[id]}); if(!ids.length) return;
   var pr=G?gCall('share_print',ids):call('api_printPdf',ids);
@@ -1523,6 +1569,7 @@ function viewSettings(){
     '<h3 style="margin:16px 0 4px;font-size:15px">Receipts</h3><div id="rcpt" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Photo places</h3><div id="plset" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Backup</h3><div id="bkset" class="muted" style="font-size:13px">Loading…</div>'+
+    '<h3 style="margin:16px 0 4px;font-size:15px">Getting started</h3><div class="muted" style="font-size:13px"><div class="setrow"><button class="btn small" id="gdOpen">Open the guide</button><span>A short tour of ArNote.</span></div></div>'+
     (S.lic&&S.lic.owner?'<h3 style="margin:16px 0 4px;font-size:15px">Users</h3><div id="ppl" class="muted" style="font-size:13px">Loading…</div>':'<h3 style="margin:16px 0 4px;font-size:15px">Updates</h3><div id="upd" class="muted" style="font-size:13px">Loading…</div>')+
     '<h3 style="margin:16px 0 4px;font-size:15px">Shared links</h3><div id="sset" class="muted" style="font-size:13px">Loading…</div>'+
     '<h3 style="margin:16px 0 4px;font-size:15px">Google accounts</h3><div id="acct" class="muted" style="font-size:13px">Loading…</div>'+
@@ -1533,6 +1580,7 @@ function viewSettings(){
   $('#cpPair').onclick=function(){var l=pairLink();(navigator.clipboard?navigator.clipboard.writeText(l):Promise.reject()).then(function(){toast('Pairing link copied')}).catch(function(){prompt('Copy this link:',l)})};
   if($('#shPair')) $('#shPair').onclick=function(){navigator.share({title:'ArNote pairing link',text:pairLink()}).catch(function(){})};
   drawMailSet(); drawPlaceSet(); drawBackupSet(); if(S.lic&&S.lic.owner) drawPeople(); else drawUpdates();
+  if($('#gdOpen')) $('#gdOpen').onclick=function(){showGuide(false)};
   call('api_linkedFolders').then(function(fs){var el=$('#lfold');if(!el)return;
     el.innerHTML=fs.length?fs.map(function(f){return '<div class="setrow"><span>📁 '+esc(f.name)+'</span><button class="btn small" data-uw="'+esc(f.id)+'">Stop syncing</button></div>'}).join('')+
       '<p style="margin:4px 0 0">New files in these folders are added to the Cabinet every 15 minutes. Stopping keeps the notes already made.</p>':'None yet. Link a folder from Inbox → 🔗 Link Drive files.';
@@ -1769,13 +1817,14 @@ function drawPeople(list){
           return '<tr'+(off?' style="opacity:.55"':'')+'><td><b>'+esc(u.name||'—')+'</b><br><span class="muted mono" style="font-size:12px" title="Google account">'+esc(u.email)+'</span>'+(u.contact&&u.contact!==u.email?'<br><span class="muted" style="font-size:12px">email: '+esc(u.contact)+'</span>':'')+(u.note?'<br><span class="muted" style="font-size:12px">'+esc(u.note)+'</span>':'')+'</td>'+
           '<td>'+st+(devs?'<br><span class="muted" style="font-size:12px">'+esc(devs)+'</span>':'')+'</td><td>'+ago(u.lastUsed)+'</td><td>'+ago(u.lastCheckin)+'</td><td>'+(u.build?esc(u.build)+(S.build&&+u.build<+S.build?' <span class="rcw" title="Behind your version '+S.build+'">⚠</span>':''):'<span class="muted">not set up yet</span>')+'</td>'+
           '<td style="white-space:nowrap">'+(!off&&!u.lastCheckin?'<button class="btn small" data-pres="'+esc(u.email)+'">Resend</button> ':'')+(off?'<button class="btn small" data-pon="'+esc(u.email)+'">Restore</button>':'<button class="btn small" data-poff="'+esc(u.email)+'">Remove</button>')+(!u.lastCheckin||off?' <button class="btn small" data-pdel="'+esc(u.email)+'" title="Delete from the list (typos, tests)">✕</button>':'')+'</td></tr>'}).join('')+'</tbody></table></div>':'<p style="margin:4px 0">Nobody yet.</p>')+
-      '<div class="setrow" style="margin-top:8px;flex-wrap:wrap"><input class="field" id="pName" placeholder="Name" style="max-width:160px;margin:0"><input class="field" id="pMail" placeholder="their email" style="max-width:260px;margin:0" autocomplete="off"><button class="btn small primary" id="pAdd">Invite</button><button class="btn small" id="pMailEd" title="The invite email is a note you can edit">✉ Edit invite email</button></div>'+
-      '<p style="margin:6px 0 0;font-size:12px">Invite emails them from your Gmail with a personal link. They confirm the Google account they\'ll use (it can differ from this email), pick their phone, and get step-by-step setup. Status goes Invited → Accepted → Set up → On phone. The email is the note <i>ArNote invite email</i>: keep the <i>Subject:</i> first line and the {invite button} line; {first name} is filled in.</p>';
+      '<div class="setrow" style="margin-top:8px;flex-wrap:wrap"><input class="field" id="pName" placeholder="Name" style="max-width:160px;margin:0"><input class="field" id="pMail" placeholder="their email" style="max-width:260px;margin:0" autocomplete="off"><button class="btn small primary" id="pAdd">Invite</button></div>'+
+      '<div class="setrow" style="margin-top:8px;flex-wrap:wrap"><span>Edit:</span>'+[['invite','Invite email'],['steps','Setup steps'],['guide','Getting started'],['releases','Release notes']].map(function(x){return '<button class="btn small" data-adm="'+x[0]+'">'+x[1]+'</button>'}).join('')+'</div>'+
+      '<p style="margin:6px 0 0;font-size:12px">Invite emails them from your Gmail with a personal link. They confirm the Google account they\'ll use (it can differ from this email), pick their phone, and get step-by-step setup. Status goes Invited → Accepted → Set up → On phone.</p><p style="margin:4px 0 0;font-size:12px">The four notes below are ordinary notes in your Cabinet; edits take effect right away (setup steps and getting started within 2 minutes). Invite email: keep the <i>Subject:</i> first line and the {invite button} line; {first name} is filled in. Setup steps: keep the headings <i>On a computer</i>, <i>iPhone</i>, <i>Android</i>, <i>No smartphone</i>; {account} and {copy link} are filled in. Release notes: lines under <i>Next release</i> become the next release\'s What\'s new.</p>';
     drawRelease();
     var act=function(p){p.then(function(l){drawPeople(l)}).catch(function(e){toast(e.message)})};
     $('#pAdd').onclick=function(){var m=$('#pMail').value.trim();if(!m){toast('Enter their email');return}var b=this;b.disabled=true;b.textContent='Sending…';act(call('api_userInvite',m,$('#pName').value.trim()).then(function(l){toast('Invite sent to '+m);return l}).finally(function(){b.disabled=false;b.textContent='Invite'}))};
     $('#pMail').onkeydown=function(e){if(e.key==='Enter')$('#pAdd').click()};
-    $('#pMailEd').onclick=function(){var b=this;b.disabled=true;call('api_inviteNote').then(function(r){return load(true).then(function(){go('note',r.id)})}).catch(function(e){toast(e.message);b.disabled=false})};
+    $$('#ppl [data-adm]').forEach(function(b){b.onclick=function(){b.disabled=true;call('api_adminNote',b.dataset.adm).then(function(r){return load(true).then(function(){go('note',r.id)})}).catch(function(e){toast(e.message);b.disabled=false})}});
     $$('#ppl [data-poff]').forEach(function(b){b.onclick=function(){if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Tap again to remove';return}act(call('api_userSet',b.dataset.poff,{status:'removed'}))}});
     $$('#ppl [data-pres]').forEach(function(b){b.onclick=function(){b.disabled=true;act(call('api_userResend',b.dataset.pres).then(function(l){toast('Invite sent again');return l}))}});
     $$('#ppl [data-pon]').forEach(function(b){b.onclick=function(){act(call('api_userSet',b.dataset.pon,{status:'active'}))}});
@@ -1794,11 +1843,14 @@ function drawUpdates(){
 /** Owner: what everyone else is running, and the button that hands them this version. */
 function drawRelease(){
   call('api_releaseInfo').then(function(r){var el=$('#relBox');if(!el)return;
-    el.innerHTML='<span><b style="color:var(--ink)">Released to everyone:</b> '+(r.n?'release '+r.n+' · '+fmt(r.at)+(r.note?' — '+esc(r.note):''):'nothing yet')+'</span>'+
-      '<input class="field" id="relNote" placeholder="What\'s new (optional)" style="max-width:220px;margin:0"><button class="btn small primary" id="relGo" title="Everyone on the list gets ArNote as it is now, within a day">Release this version</button>';
+    el.style.flexWrap='wrap';
+    el.innerHTML='<span style="flex-basis:100%"><b style="color:var(--ink)">Released to everyone:</b> '+(r.n?'release '+r.n+' · '+fmt(r.at):'nothing yet')+'</span>'+
+      '<textarea class="field" id="relNote" rows="4" placeholder="What\'s new: one line per change, starting with -" style="flex-basis:100%;margin:4px 0;font:13px/1.4 inherit">'+esc(r.draft||'')+'</textarea>'+
+      '<span class="muted" style="font-size:12px">'+(r.draft?'Filled in from <i>Next release</i> in your release notes; edit freely. ':'')+'Users see this once, the first time they open the new release.</span><span class="grow"></span>'+
+      '<button class="btn small primary" id="relGo" title="Everyone on the list gets ArNote as it is now, within a day">Release this version</button>';
     $('#relGo').onclick=function(){var b=this;if(!b.dataset.arm){b.dataset.arm=1;b.textContent='Tap again to release';return}
       b.disabled=true;b.textContent='Releasing…';
-      call('api_releaseNow',$('#relNote').value.trim()).then(function(){toast('Released — everyone gets it within a day');drawRelease()}).catch(function(e){toast(e.message);b.disabled=false;b.textContent='Release this version';delete b.dataset.arm})};
+      call('api_releaseNow',$('#relNote').value.trim()).then(function(){toast('Released: everyone gets it within a day');drawRelease()}).catch(function(e){toast(e.message);b.disabled=false;b.textContent='Release this version';delete b.dataset.arm})};
   }).catch(function(){});
 }
 function today(){var d=new Date();return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2)}
@@ -2449,15 +2501,17 @@ function showPair(msg){
 }
 function tryPair(c){
   if($('#perr')) $('#perr').textContent='Connecting…';
-  rawCall(c,'api_appInfo',[]).then(function(){saveCfg(c);start()}).catch(function(e){if($('#perr'))$('#perr').textContent='Could not connect: '+e.message;else showPair('Could not connect: '+e.message)});
+  rawCall(c,'api_appInfo',[]).then(function(){saveCfg(c);S.justPaired=true;start()}).catch(function(e){if($('#perr'))$('#perr').textContent='Could not connect: '+e.message;else showPair('Could not connect: '+e.message)});
 }
 function start(){
   document.body.classList.remove('unpaired');
   $('#main').innerHTML='<div class="loading">Loading notes…</div>';
-  Promise.all([load().catch(function(e){S.loadErr=e}),call('api_appInfo',devLabel()).then(function(i){DROP_URL=i.dropUrl||'';LINK_URL=i.linkUrl||'';if(i.user)S.user=i.user;S.lic=i.licence||null;S.build=i.build}).catch(function(){})]).then(function(){
+  Promise.all([load().catch(function(e){S.loadErr=e}),call('api_appInfo',devLabel()).then(function(i){DROP_URL=i.dropUrl||'';LINK_URL=i.linkUrl||'';if(i.user)S.user=i.user;S.lic=i.licence||null;S.build=i.build;S.rel=i.release;S.relNotes=i.notes}).catch(function(){})]).then(function(){
     if(S.lic&&!S.lic.ok){showEnded();return}
     if(S.loadErr) throw S.loadErr;
     if(location.search.indexOf('share=1')>=0) receiveShare(); else go('home');
+    whatsNew(S.rel,S.relNotes);
+    if(S.justPaired&&!(S.lic&&S.lic.owner)){var g=0;try{g=localStorage.getItem('arnote.guideSeen')}catch(e){}if(!g){try{localStorage.setItem('arnote.guideSeen','1')}catch(e){}setTimeout(function(){showGuide(true)},600)}}
   });
 }
 /** This copy is no longer on Brian's list: say so plainly; everything is still in their Drive. */
@@ -2502,11 +2556,22 @@ function showInvite(tok){
       :phone==='android'?'<p style="margin:0 0 6px">Open the pairing link from your email in <b>Chrome</b>, tap the <b>⋮</b> menu <b>→ Install app</b> (or <b>Add to Home screen</b>). ArNote is now an app on your phone.</p>'+
         '<p style="margin:0">Then in your gallery or a text, tap <b>Share → ArNote</b> to send photos straight in.</p>'
       :'<p style="margin:0">Use the pairing link on any computer or tablet. If you get a smartphone later, come back to this page.</p>';
-    box(hello+'<p style="margin:6px 0 0">Your ArNote account: '+A+'</p>'+steps+'<h3 style="margin:16px 0 4px">On your phone (highly recommended)</h3>'+ph+'<div id="ivPh" style="margin-top:8px">'+ph2+'</div>'+
+    var fill=function(h){return String(h).replace(/\{account\}/g,A).replace(/\{copy link\}/gi,'<a href="'+esc(v.copyUrl)+'" target="_blank"><b>Make my copy of ArNote</b></a>')};
+    var doc=SD.steps&&SD.steps.sections, comp=steps, phoneH=ph2, intro='';
+    if(doc&&doc.length){
+      var pick=function(re){return doc.filter(function(x){return re.test(x.title)})[0]};
+      var c=pick(/computer/i), pi=phone==='ios'?pick(/iphone|ios/i):phone==='android'?pick(/android/i):pick(/no smartphone|none|without/i);
+      intro=doc.filter(function(x){return !x.title}).map(function(x){return x.html}).join('');
+      if(c) comp=fill(c.html); if(pi) phoneH=fill(pi.html.replace(/^<h[1-4]>[\s\S]*?<\/h[1-4]>/,''));
+    }
+    box(hello+'<p style="margin:6px 0 0">Your ArNote account: '+A+'</p><div class="guide">'+fill(intro)+comp+'</div><h3 style="margin:16px 0 4px">On your phone (highly recommended)</h3>'+ph+'<div id="ivPh" class="guide" style="margin-top:8px">'+phoneH+'</div>'+
+      '<details style="margin-top:16px"><summary style="cursor:pointer"><b>What you can do with ArNote</b> (getting started)</summary><div class="guide" id="ivGd">'+(SD.guide&&SD.guide.html||'<p class="muted">Loading…</p>')+'</div></details>'+
       '<p class="muted" style="font-size:13px;margin-top:16px">Keep this email: the same link brings you back to these steps. Questions? Reply to the invite email.</p>'+(CFG?'<a class="btn" href="./">Go to my ArNote</a>':''));
     $$('#main [data-ph]').forEach(function(b){b.onclick=function(){phone=b.dataset.ph;draw(v)}});
   };
-  invCall({inv:'get',t:tok}).then(draw).catch(function(e){box('<p class="err">'+esc(e.message)+'</p>')});
+  var SD={};
+  adminDoc('guide').then(function(r){SD.guide=r;var g=$('#ivGd');if(g&&r)g.innerHTML=r.html}).catch(function(){});
+  Promise.all([invCall({inv:'get',t:tok}),adminDoc('steps').then(function(r){SD.steps=r}).catch(function(){})]).then(function(x){draw(x[0])}).catch(function(e){box('<p class="err">'+esc(e.message)+'</p>')});
 }
 /* ---------- things shared into ArNote from other apps (Android share sheet) ---------- */
 function receiveShare(){

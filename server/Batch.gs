@@ -437,6 +437,10 @@ function doPost(e) {
       out = { ok: true, result: shareDispatch_(req.s, String(req.fn || ''), Array.isArray(req.a) ? req.a : []) };
       return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
     }
+    if (req.inv === 'doc') {                          // setup steps / getting-started guide (public how-to text)
+      out = { ok: true, result: isLicenceServer_() ? adminDocPublic_(String(req.kind || '')) : null };
+      return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+    }
     if (req.inv === 'get' || req.inv === 'accept') {   // the invite page (public; only answers a valid invite token)
       out = { ok: true, result: isLicenceServer_() ? inviteReq_(req) : null };
       return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
@@ -486,7 +490,9 @@ function api_appInfo(dev) {
   var drop = null; try { drop = dropFolder_().getUrl(); } catch (e) {}
   var link = null; try { link = linkFolder_().getUrl(); } catch (e) {}
   noteUsed_(); try { noteDevice_(dev); } catch (e) {}
-  return { user: Session.getEffectiveUser().getEmail(), dropUrl: drop, linkUrl: link, version: 2, build: ARNOTE_BUILD, licence: licenceState_() };
+  var p = props_(), own = isLicenceServer_(), notes = []; if (!own) { try { notes = JSON.parse(p.getProperty('releaseNotes') || '[]'); } catch (e) {} }
+  return { user: Session.getEffectiveUser().getEmail(), dropUrl: drop, linkUrl: link, version: 2, build: ARNOTE_BUILD, licence: licenceState_(),
+    release: +p.getProperty(own ? 'releaseN' : 'releaseInstalled') || 0, notes: notes };
 }
 
 /** Which kinds of device open this ArNote (e.g. "iPhone app", "Windows"), so Brian can see who has it on their phone.
@@ -551,6 +557,206 @@ function api_userDelete(email) {
   if (u) t.sh.deleteRow(u.row);
   return api_users();
 }
+/* ---------- Brian's editable notes: invite email, setup steps, getting started, release notes ----------
+ * Each is an ordinary ArNote note in the Cabinet; ArNote reads it when it's needed, so edits take effect right away. */
+var STEPS_DEFAULT_HTML_ = '<p>Follow these once. Your notes and photos stay in your own Google Drive.</p>' +
+  '<h2>On a computer (about 10 minutes)</h2><ol>' +
+  '<li>Be signed in to Google as {account}. (If you use several Google accounts, sign out of the others or use a private window.) Then open {copy link} and click <b>Make a copy</b>.</li>' +
+  '<li>In your copy, wait a few seconds for the <b>ArNote</b> menu at the top (refresh the page if it doesn\'t appear), then choose <b>ArNote → Set up ArNote</b>.</li>' +
+  '<li>Google asks for permission: choose {account}. If you see <i>Google hasn\'t verified this app</i>, click <b>Advanced → Go to ArNote</b>, then <b>Allow</b>. (It\'s "unverified" only because it\'s a private app, not one from an app store.)</li>' +
+  '<li>When it says ArNote is set up: <b>Extensions → Apps Script</b>, then <b>Deploy</b> (blue button, top right) <b>→ New deployment →</b> the gear <b>→ Web app</b>. Set <b>Execute as: Me</b> and <b>Who has access: Anyone</b>, click <b>Deploy</b>, allow the permissions, then click <b>Copy</b> under <i>Web app URL</i>. ("Anyone" only lets your phone reach your ArNote; it still needs your private pairing link.)</li>' +
+  '<li>Back in the spreadsheet: <b>ArNote → Open the app</b>, paste the address, and click <b>Get my pairing link</b>. Click <b>Open ArNote here</b> to start, and <b>email the pairing link to yourself</b> for your phone. Keep it private: it\'s the key to your notes.</li></ol>' +
+  '<h2>iPhone</h2><p>Open the pairing link from your email in <b>Safari</b> (or Chrome), tap <b>Share</b> (the square with the arrow) <b>→ Add to Home Screen</b>. ArNote is now an app on your phone.</p>' +
+  '<p>To send photos from your gallery or a text: iPhone doesn\'t let web apps appear in the Share menu, so tap <b>Share → Mail</b> and send them to your ArNote email address. You\'ll find it in ArNote under <b>Settings → Email to ArNote</b>; if your phone sends from a different address, allow that address there too. Or open ArNote and add photos from there.</p>' +
+  '<h2>Android</h2><p>Open the pairing link from your email in <b>Chrome</b>, tap the <b>⋮</b> menu <b>→ Install app</b> (or <b>Add to Home screen</b>). ArNote is now an app on your phone.</p>' +
+  '<p>Then in your gallery or a text, tap <b>Share → ArNote</b> to send photos straight in.</p>' +
+  '<h2>No smartphone</h2><p>Use the pairing link on any computer or tablet. If you get a smartphone later, come back to this page.</p>';
+var GUIDE_DEFAULT_HTML_ = '<p>ArNote works like a mailbox and a filing cabinet: new things land in your <b>Inbox</b>, you give them a tag or two, and they go to the <b>Cabinet</b>, where you can always find them.</p>' +
+  '<h2>1. Get things in</h2><ul>' +
+  '<li><b>Write a note:</b> tap <b>+ Note</b>.</li>' +
+  '<li><b>Photos and files:</b> in the Inbox, tap <b>+ Add files</b> (on a computer you can also drag files onto ArNote). On Android, use <b>Share → ArNote</b> from your gallery or a text.</li>' +
+  '<li><b>Email:</b> forward any email to your ArNote address (<b>Settings → Email to ArNote</b>). On iPhone this is also how to send photos from your gallery or a text: <b>Share → Mail</b>.</li>' +
+  '<li><b>Receipts and business cards:</b> photos of them are read and tagged for you, ready to check in the Inbox.</li></ul>' +
+  '<h2>2. Tag and file</h2><ul>' +
+  '<li>Open a note in your <b>Inbox</b> and add tags. Tags are grouped under <b>Who</b>, <b>What</b>, <b>When</b> and <b>Where</b>; add your own under any of them in <b>Tags</b>.</li>' +
+  '<li>Then file it to the <b>Cabinet</b>. To tag several notes at once, tick their checkboxes and choose <b>Tags…</b></li></ul>' +
+  '<h2>3. Find things</h2><ul>' +
+  '<li><b>Search</b> (top left) looks through titles and text.</li>' +
+  '<li><b>Tags</b> lets you drill down: tap a tag, then a tag inside it.</li>' +
+  '<li><b>Bookmark</b> a note (★) to keep it in <b>Shortcuts</b>.</li></ul>' +
+  '<h2>4. Photos</h2><ul><li><b>Photos</b> is one gallery for all your pictures: browse by tag, or by place on the map.</li></ul>' +
+  '<h2>5. Receipts</h2><ul><li>Give each receipt a <b>Job</b> and an <b>Expense category</b>. <b>Receipts</b> shows them by job and category, billed or not, and prints a clean report.</li></ul>' +
+  '<h2>6. Get help from AI</h2><ul><li>Tick the notes you want help with and choose <b>Export for AI</b>. You get one file (or text to paste) that Claude, ChatGPT or Gemini can read.</li></ul>' +
+  '<p>Your notes are Google Docs in the <b>ArNote</b> folder of your Google Drive, and a backup is made every day. See this guide again any time under <b>Settings → Getting started</b>.</p>';
+var RELEASES_DEFAULT_ = ['Next release',
+  '- What\'s new: after each update, ArNote shows you what changed, once (like this).',
+  '- Getting started: a short guide to ArNote, under Settings → Getting started.',
+  '- Export for AI: tick some notes and choose Export for AI to get one file that Claude, ChatGPT or Gemini can read, so an AI can help with them.', '',
+  'Release 7 · Oct 26, 2026', '- Your ArNote tells its owner which kinds of device it is used on (for example iPhone or Windows), so setup help can be pointed at the right phone. Nothing else about your devices is shared.', '',
+  'Release 6 · Oct 26, 2026', '- "Open the app" in the spreadsheet: the address box fits the window.', '',
+  'Release 5 · Oct 26, 2026', '- ArNote repairs itself if an update ever arrives damaged.', '- The ArNote menu in the spreadsheet always shows Open the app.', '',
+  'Release 4 · Oct 26, 2026', '- "Open the app" asks once for your web app address and checks it, so your pairing link always works.', '',
+  'Release 3 · Oct 26, 2026', '- First automatic update test.', '',
+  'Release 2 · Oct 26, 2026', '- Clearer setup wording.', '',
+  'Release 1 · Oct 26, 2026', '- First release for friends and family.'].join('\n');
+var ADMIN_NOTES_ = {
+  invite: { prop: 'inviteNoteId', title: 'ArNote invite email' },
+  steps: { prop: 'stepsNoteId', title: 'ArNote setup steps', html: function () { return STEPS_DEFAULT_HTML_; } },
+  guide: { prop: 'guideNoteId', title: 'ArNote getting started', html: function () { return GUIDE_DEFAULT_HTML_; } },
+  releases: { prop: 'releasesNoteId', title: 'ArNote release notes' }
+};
+/** Owner: the note for one of these (made from the default the first time). */
+function api_adminNote(kind) {
+  if (!isLicenceServer_()) throw new Error('Only the owner can edit this');
+  var a = ADMIN_NOTES_[kind]; if (!a) throw new Error('Unknown note');
+  var p = props_(), id = p.getProperty(a.prop);
+  if (id) { try { findNoteRow_(id); return { id: id }; } catch (e) {} }
+  var n = a.html ? createHtmlNote_(a.title, a.html()) : api_createNote(a.title, kind === 'invite' ? INVITE_DEFAULT_ : RELEASES_DEFAULT_, []);
+  try { api_updateNote(n.id, { notebook: 'Cabinet' }); } catch (e) {}
+  p.setProperty(a.prop, n.id);
+  return { id: n.id };
+}
+function api_inviteNote() { return api_adminNote('invite'); }
+/** A note made from HTML (Drive converts it to a formatted Google Doc), registered like api_createNote. */
+function createHtmlNote_(title, html) {
+  var b = 'arnote' + Date.now(), meta = { name: title, mimeType: 'application/vnd.google-apps.document', parents: [props_().getProperty('notesId')] };
+  var body = '--' + b + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(meta) + '\r\n--' + b +
+    '\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n<html><body><p>' + headerLine_('Inbox', []) + '</p>' + html + '</body></html>\r\n--' + b + '--';
+  var r = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', { method: 'post', contentType: 'multipart/related; boundary=' + b,
+    payload: Utilities.newBlob(body).getBytes(), headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+  if (r.getResponseCode() >= 300) throw new Error('Could not create the note (' + r.getResponseCode() + ')');
+  var docId = JSON.parse(r.getContentText()).id, now = new Date(), id = Utilities.getUuid();
+  ss_().getSheetByName('Notes').appendRow(noteToRow_({ id: id, title: title, notebook: 'Inbox', tags: '', created: now, updated: now, docId: docId, starred: false, source: 'arenote', sourceUrl: '', author: '', attachments: 0 }));
+  return { id: id, docId: docId };
+}
+function adminDocId_(kind) {
+  var id = props_().getProperty(ADMIN_NOTES_[kind].prop); if (!id) return null;
+  try { return ss_().getSheetByName('Notes').getRange(findNoteRow_(id), NOTE_COLS.indexOf('docId') + 1).getValue(); } catch (e) { return null; }
+}
+/** A note as safe, simple HTML for a public page: headings, paragraphs, lists, bold/italic, links. Nothing else survives. */
+function cleanDocHtml_(docId) {
+  var r = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + docId + '/export?mimeType=text/html', { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+  if (r.getResponseCode() !== 200) return '';
+  return cleanHtml_(r.getContentText('UTF-8'));
+}
+function cleanHtml_(h) {
+  var css = (h.match(/<style[^>]*>([\s\S]*?)<\/style>/i) || [])[1] || '', fmt = {};
+  css.replace(/\.(c\d+)\{([^}]*)\}/g, function (m, c, d) { fmt[c] = { b: /font-weight:\s*(700|bold)/.test(d), i: /font-style:\s*italic/.test(d) }; return m; });
+  var body = (h.match(/<body[^>]*>([\s\S]*)<\/body>/i) || [])[1] || h;
+  body = body.replace(/<(script|style|title|head)\b[\s\S]*?<\/\1>/gi, '');
+  body = body.replace(/<p\b[^>]*>(?:(?!<\/p>)[\s\S])*?Notebook:(?:(?!<\/p>)[\s\S])*?<\/p>/, '');      // ArNote's header line
+  var out = [], stack = [];
+  body.replace(/<(\/?)([a-zA-Z0-9]+)([^>]*)>|([^<]+)/g, function (m, close, tag, attrs, text) {
+    if (text !== undefined) { out.push(text); return m; }
+    tag = tag.toLowerCase();
+    if (tag === 'span') {
+      if (close) { out.push(stack.pop() || ''); return m; }
+      var cls = ((attrs.match(/class="([^"]*)"/) || [])[1] || '').split(/\s+/), b = false, it = false;
+      cls.forEach(function (c) { if (fmt[c]) { b = b || fmt[c].b; it = it || fmt[c].i; } });
+      out.push((b ? '<b>' : '') + (it ? '<i>' : '')); stack.push((it ? '</i>' : '') + (b ? '</b>' : '')); return m;
+    }
+    if (/^(p|br|ol|ul|li|h1|h2|h3|h4|b|i|strong|em)$/.test(tag)) {
+      var extra = !close && tag === 'ol' ? ((attrs.match(/start="(\d+)"/) || [])[0] || '') : '';
+      out.push('<' + close + tag + (extra ? ' ' + extra : '') + '>'); return m;
+    }
+    if (tag === 'a') {
+      if (close) { out.push('</a>'); return m; }
+      var href = ((attrs.match(/href="([^"]*)"/) || [])[1] || '').replace(/&amp;/g, '&');
+      var q = href.match(/^https:\/\/www\.google\.com\/url\?q=([^&]+)/); if (q) href = decodeURIComponent(q[1]);
+      out.push(/^https?:\/\//.test(href) ? '<a href="' + href.replace(/"/g, '&quot;') + '" target="_blank" rel="noopener">' : '<a>'); return m;
+    }
+    return m;                                       // any other tag is dropped, its text kept
+  });
+  return out.join('').replace(/<p>\s*<\/p>/g, '').replace(/<(b|i)>\s*<\/\1>/g, '').trim();
+}
+/** Public (no key): the setup steps (split into sections by heading) or the getting-started guide. */
+function adminDocPublic_(kind) {
+  if (kind !== 'steps' && kind !== 'guide') return null;
+  var cache = CacheService.getScriptCache(), key = 'adm_' + kind, hit = cache.get(key);
+  if (hit) return JSON.parse(hit);
+  var docId = adminDocId_(kind), html = docId ? cleanDocHtml_(docId) : '';
+  if (!html) html = ADMIN_NOTES_[kind].html();
+  var res = { html: html };
+  if (kind === 'steps') {
+    var parts = html.split(/(?=<h[1-4]>)/), secs = [];
+    parts.forEach(function (s) { var m = s.match(/^<h[1-4]>([\s\S]*?)<\/h[1-4]>/); secs.push({ title: m ? m[1].replace(/<[^>]+>/g, '').trim() : '', html: s }); });
+    res.sections = secs;
+  }
+  try { cache.put(key, JSON.stringify(res), 120); } catch (e) {}
+  return res;
+}
+
+/* ---------- Release notes: "Next release" lines become the release's What's new ---------- */
+function releasesText_() {
+  var docId = adminDocId_('releases'); if (!docId) return RELEASES_DEFAULT_;
+  try { return DocumentApp.openById(docId).getBody().getText().replace(/\r/g, '').replace(/^\s*Notebook:[^\n]*\n?/, ''); } catch (e) { return RELEASES_DEFAULT_; }
+}
+/** {draft, history:[{n, title, text}]} */
+function parseReleases_(t) {
+  var lines = t.split('\n'), draft = [], hist = [], cur = null, inNext = false;
+  lines.forEach(function (l) {
+    var m = l.match(/^\s*Release\s+(\d+)\b(.*)$/i);
+    if (/^\s*Next release\s*$/i.test(l)) { inNext = true; cur = null; return; }
+    if (m) { inNext = false; cur = { n: +m[1], title: l.trim(), lines: [] }; hist.push(cur); return; }
+    if (inNext) draft.push(l); else if (cur) cur.lines.push(l);
+  });
+  var clean = function (a) { return a.join('\n').replace(/^\s+|\s+$/g, ''); };
+  return { draft: clean(draft), history: hist.map(function (h) { return { n: h.n, title: h.title, text: clean(h.lines) }; }) };
+}
+/** After a release: the draft moves under "Release N · date"; "Next release" starts empty. */
+function rotateReleases_(n, note) {
+  api_adminNote('releases');
+  var docId = adminDocId_('releases'), r = parseReleases_(releasesText_());
+  var title = 'Release ' + n + ' · ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MMM d, yyyy');
+  r.history.unshift({ n: n, title: title, text: String(note || '').trim() });
+  var doc = DocumentApp.openById(docId), body = doc.getBody(), H = DocumentApp.ParagraphHeading;
+  var keep = body.getChild(0); while (body.getNumChildren() > 1) body.removeChild(body.getChild(1));
+  if (!(keep.getType() === DocumentApp.ElementType.PARAGRAPH && /^Notebook:/.test(keep.asParagraph().getText()))) keep.asParagraph().setText(headerLine_('Cabinet', []));
+  body.appendParagraph('Next release').setHeading(H.HEADING2);
+  body.appendParagraph('');
+  r.history.forEach(function (h) {
+    body.appendParagraph(h.title).setHeading(H.HEADING3);
+    (h.text || '').split('\n').forEach(function (l) { body.appendParagraph(l).setHeading(H.NORMAL); });
+    body.appendParagraph('').setHeading(H.NORMAL);
+  });
+  doc.saveAndClose();
+  return r.history.slice(0, 12);
+}
+
+/* ---------- Export notes for AI: one Markdown file ---------- */
+function api_exportMarkdown(ids) {
+  ids = (ids || []).slice(0, 40);
+  var notes = readTable_('Notes'), byId = {}; notes.forEach(function (n) { byId[n.id] = n; });
+  var atts = readTable_('Attachments'), tok = ScriptApp.getOAuthToken(), tz = Session.getScriptTimeZone();
+  var d = function (x) { return x ? Utilities.formatDate(new Date(x), tz, 'yyyy-MM-dd') : ''; };
+  return ids.map(function (id) {
+    var n = byId[id]; if (!n) return '';
+    var out = ['## ' + String(n.title || 'Untitled'), ''];
+    var tags = String(n.tags || '').split(TAG_SEP).filter(String);
+    out.push('- Tags: ' + (tags.length ? tags.join(', ') : '(none)'));
+    out.push('- Notebook: ' + n.notebook);
+    out.push('- Created: ' + d(n.created) + (d(n.updated) && d(n.updated) !== d(n.created) ? ' · Updated: ' + d(n.updated) : ''));
+    if (n.author) out.push('- From: ' + n.author);
+    if (n.sourceUrl) out.push('- Source: ' + n.sourceUrl);
+    var a = atts.filter(function (x) { return x.noteId === id; });
+    if (a.length) out.push('- Attachments: ' + a.map(function (x) { return '[' + x.filename + '](https://drive.google.com/file/d/' + x.fileId + '/view)'; }).join(', '));
+    out.push('');
+    var text = '';
+    if (n.source === 'link') {
+      var meta = null; try { meta = driveMeta_(n.docId); } catch (e) {}
+      if (meta && meta.mimeType !== 'application/vnd.google-apps.document') text = 'Linked file: [' + meta.name + '](' + (meta.webViewLink || n.sourceUrl) + ')' + (/^image\//.test(meta.mimeType) ? ' (photo)' : '');
+    }
+    if (!text) {
+      var fetch = function (mime) { var r = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + n.docId + '/export?mimeType=' + encodeURIComponent(mime), { headers: { Authorization: 'Bearer ' + tok }, muteHttpExceptions: true }); return r.getResponseCode() === 200 ? r.getContentText('UTF-8') : null; };
+      text = fetch('text/markdown') || fetch('text/plain') || '(Could not read this note.)';
+      text = text.replace(/^﻿/, '').replace(/^[\s\S]*?Notebook:[^\n]*\n/, function (m) { return m.length < 400 ? '' : m; })
+        .replace(/^\[image\d+\]:\s*<?data:[^\n]*$/gm, '').replace(/!\[([^\]]*)\]\[image\d+\]/g, '[picture]').replace(/!\[([^\]]*)\]\(data:[^)]*\)/g, '[picture]').trim();
+    }
+    out.push(text, '', '---', '');
+    return out.join('\n');
+  }).join('\n');
+}
+
 /* ---------- Invites: Brian types an email and clicks Invite; they confirm their Google account on the invite page ---------- */
 function inviteToken_() { return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, Utilities.getUuid() + Date.now())).replace(/=+$/, '').slice(0, 32); }
 function api_userInvite(contact, name) {
@@ -585,25 +791,9 @@ var INVITE_DEFAULT_ = ['Subject: You\'re invited to ArNote', '',
   '{invite button}', '',
   'Then put it on your phone too. That\'s where it shines: snap a receipt or a business card, or send photos from your gallery or a text, and it\'s filed in seconds. The same link shows the phone steps.', '',
   'Any questions, just reply.'].join('\n');
-/** Owner: the note holding the invite email (made from the default the first time). */
-function api_inviteNote() {
-  if (!isLicenceServer_()) throw new Error('Only the owner sends invites');
-  var p = props_(), id = p.getProperty('inviteNoteId');
-  if (id) { try { findNoteRow_(id); return { id: id }; } catch (e) {} }
-  var n = api_createNote('ArNote invite email', INVITE_DEFAULT_, []);
-  try { api_updateNote(n.id, { notebook: 'Cabinet' }); } catch (e) {}
-  p.setProperty('inviteNoteId', n.id);
-  return { id: n.id };
-}
 function inviteText_() {
-  var id = props_().getProperty('inviteNoteId');
-  if (id) {
-    try {
-      var row = findNoteRow_(id), docId = ss_().getSheetByName('Notes').getRange(row, NOTE_COLS.indexOf('docId') + 1).getValue();
-      var t = DocumentApp.openById(docId).getBody().getText().replace(/^\s*Notebook:[^\n]*\n?/, '');
-      if (t.trim()) return t;
-    } catch (e) {}
-  }
+  var docId = adminDocId_('invite');
+  if (docId) { try { var t = DocumentApp.openById(docId).getBody().getText().replace(/^\s*Notebook:[^\n]*\n?/, ''); if (t.trim()) return t; } catch (e) {} }
   return INVITE_DEFAULT_;
 }
 function inviteEmail_(to, name, tok) {
@@ -694,16 +884,21 @@ function api_releaseNow(note) {
   if (code.indexOf('function doPost(') < 0 || code.indexOf('function setup(') < 0) throw new Error('The code from GitHub looks incomplete; nothing was released');
   try { new Function(code); } catch (e) { throw new Error('The code from GitHub has an error (' + e.message + '); nothing was released'); }
   var p = props_(), n = (+p.getProperty('releaseN') || 0) + 1, at = new Date().toISOString();
-  var rel = JSON.stringify({ n: n, at: at, note: String(note || '').slice(0, 200), code: code });
+  note = String(note || '').trim().slice(0, 3000);
+  var hist = []; try { hist = parseReleases_(releasesText_()).history; } catch (e) {}
+  hist = [{ n: n, title: 'Release ' + n + ' · ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MMM d, yyyy'), text: note }].concat(hist.filter(function (h) { return h.n < n; })).slice(0, 12);
+  var rel = JSON.stringify({ n: n, at: at, note: note, notes: hist, code: code });
   var root = DriveApp.getFolderById(p.getProperty('rootId')), id = p.getProperty('releaseFile'), f = null;
   if (id) { try { f = DriveApp.getFileById(id); if (f.isTrashed()) f = null; } catch (e) { f = null; } }
   if (f) f.setContent(rel); else { f = root.createFile('ArNote release.json', rel, 'application/json'); p.setProperty('releaseFile', f.getId()); }
-  p.setProperties({ releaseN: String(n), releaseAt: at, releaseNote: String(note || '').slice(0, 200) });
+  p.setProperties({ releaseN: String(n), releaseAt: at, releaseNote: note.slice(0, 2000) });
+  try { rotateReleases_(n, note); } catch (e) { Logger.log('Release notes: ' + e); }
   return api_releaseInfo();
 }
 function api_releaseInfo() {
   var p = props_();
-  if (isLicenceServer_()) return { owner: true, n: +p.getProperty('releaseN') || 0, at: p.getProperty('releaseAt') || '', note: p.getProperty('releaseNote') || '' };
+  if (isLicenceServer_()) { var dr = ''; try { dr = parseReleases_(releasesText_()).draft; } catch (e) {}
+    return { owner: true, n: +p.getProperty('releaseN') || 0, at: p.getProperty('releaseAt') || '', note: p.getProperty('releaseNote') || '', draft: dr }; }
   var l = {}; try { l = JSON.parse(p.getProperty('licence') || '{}'); } catch (e) {}
   return { owner: false, installed: +p.getProperty('releaseInstalled') || 0, latest: +l.release || 0, at: p.getProperty('updatedAt') || '', error: p.getProperty('updateErr') || '' };
 }
@@ -741,7 +936,10 @@ function selfUpdate_() {
   if (f) f.setContent(rel.code);
   else { f = (p.getProperty('rootId') ? DriveApp.getFolderById(p.getProperty('rootId')) : DriveApp.getRootFolder()).createFile('ArNote code.js', rel.code, 'text/plain'); p.setProperty('codeFile', f.getId()); }
   warmCode_(rel.code);
-  p.setProperties({ releaseInstalled: String(rel.n), updatedAt: new Date().toISOString(), updateErr: '' });
+  var notes = (rel.notes || [{ n: rel.n, title: 'Release ' + rel.n, text: rel.note || '' }]).slice(0, 12), nj = JSON.stringify(notes);
+  while (nj.length > 8000 && notes.length > 1) { notes.pop(); nj = JSON.stringify(notes); }
+  if (nj.length > 8000) nj = JSON.stringify([{ n: rel.n, title: 'Release ' + rel.n, text: String(rel.note || '').slice(0, 6000) }]);
+  p.setProperties({ releaseInstalled: String(rel.n), updatedAt: new Date().toISOString(), updateErr: '', releaseNotes: nj });
   return rel.n;
 }
 function api_updateNow() { licenceCheck_(); var n = selfUpdate_(); return { updated: n, info: api_releaseInfo() }; }
