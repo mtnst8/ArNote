@@ -2579,15 +2579,20 @@ function api_justPhoto(noteIds) {
     var want = {}; (noteIds || []).forEach(function (id) { want[id] = 1; });
     var nsh = ss_().getSheetByName('Notes'), nv = nsh.getDataRange().getValues(), head = nv[0];
     var cId = head.indexOf('id'), cDoc = head.indexOf('docId'), cSrc = head.indexOf('source'), files = {}, rows = [];
-    for (var i = 1; i < nv.length; i++) if (want[nv[i][cId]] && nv[i][cSrc] === 'link') { files[String(nv[i][cDoc])] = nv[i][cId]; rows.push(i + 1); }
-    var psh = photoSheet_(), pv = psh.getDataRange().getValues(), sc = PHOTO_COLS.indexOf('scan'), st = PHOTO_COLS.indexOf('status'), photos = 0, keep = {};
-    for (var j = 1; j < pv.length; j++) if (files[pv[j][0]] !== undefined) { pv[j][sc] = 'photo'; pv[j][st] = ''; photos++; keep[files[pv[j][0]]] = 1; }
+    var cTags = head.indexOf('tags'), noteTags = {}, scanTags = { 'Document': 1, 'Receipt': 1, 'Business Card': 1 };
+    for (var i = 1; i < nv.length; i++) if (want[nv[i][cId]] && nv[i][cSrc] === 'link') { files[String(nv[i][cDoc])] = nv[i][cId]; noteTags[nv[i][cId]] = splitTags_(nv[i][cTags]); rows.push(i + 1); }
+    var psh = photoSheet_(), pv = psh.getDataRange().getValues(), sc = PHOTO_COLS.indexOf('scan'), st = PHOTO_COLS.indexOf('status'), tg = PHOTO_COLS.indexOf('tags'), photos = 0, keep = {};
+    for (var j = 1; j < pv.length; j++) if (files[pv[j][0]] !== undefined) {
+      var nid = files[pv[j][0]], have = splitTags_(pv[j][tg]);
+      (noteTags[nid] || []).forEach(function (t) { if (!scanTags[t] && have.indexOf(t) < 0) have.push(t); });   // tags given to the note stay with the photo
+      pv[j][tg] = have.join(TAG_SEP); pv[j][sc] = 'photo'; pv[j][st] = ''; photos++; keep[nid] = 1;
+    }
     if (photos) psh.getRange(1, 1, pv.length, pv[0].length).setValues(pv);
     rows = rows.filter(function (r) { return keep[nv[r - 1][cId]]; });     // only notes that really were made from a photo
     rows.sort(function (a, b) { return b - a; }).forEach(function (r) { nsh.deleteRow(r); });
     var rsh = receiptSheet_(), rv = rsh.getDataRange().getValues(), rn = RECEIPT_COLS.indexOf('noteId');
     for (var k = rv.length - 1; k >= 1; k--) if (keep[rv[k][rn]]) rsh.deleteRow(k + 1);
-    return { done: rows.length };
+    return { done: rows.length, asked: (noteIds || []).length };
   } finally { lock.releaseLock(); }
 }
 /** "Note with this photo": a new Inbox note with the picture in it (1600 px copy), a link to the original, the photo's tags, and room to write. */
