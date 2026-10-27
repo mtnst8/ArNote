@@ -2350,9 +2350,9 @@ function phPaint(){
   var bar=$('#phBar'); if(!bar) return;
   if(!n){bar.innerHTML=P.secs.length?'<div class="muted" style="font-size:12px;margin-top:4px">Tap the corner box (or long-press on a phone) to select · Shift-click selects a range · the box by a month selects the whole month</div>':'';return}
   var recent=(store('recentTags')||[]).filter(function(t){return S.parent.hasOwnProperty(t)}).slice(0,6);
-  bar.innerHTML='<div class="phbar"><b>'+n+' selected</b><span class="tagbox"><input id="pbIn" placeholder="Type a tag + Enter" autocomplete="off"><div class="tagsug" id="pbSug"></div></span>'+
+  bar.innerHTML='<div class="phbar"><b>'+n+' selected</b><button class="btn small" id="pbClr" title="Clear selection (Esc)">✕ Clear selection</button><span class="tagbox"><input id="pbIn" placeholder="Type a tag + Enter" autocomplete="off"><div class="tagsug" id="pbSug"></div></span>'+
     recent.map(function(t){return '<button class="chip" data-rt="'+esc(t)+'">+ '+esc(t)+'</button>'}).join('')+
-    '<button class="btn small" id="pbTag">Tags…</button><button class="btn small" id="pbScan" title="Read receipts, business cards and documents">🧾 Scan</button><button class="btn small" id="pbDl" title="Download the originals">⇩ Download</button><button class="btn small" id="pbDel" title="Move to Drive trash (Undo for a few seconds)">🗑 Delete</button><button class="btn small" id="pbClr" title="Esc">Clear</button></div>';
+    '<button class="btn small" id="pbTag">Tags…</button><button class="btn small" id="pbScan" title="Read receipts, business cards and documents">🧾 Scan</button><button class="btn small" id="pbDl" title="Download the originals">⇩ Download</button><button class="btn small" id="pbDel" title="Move to Drive trash (Undo for a few seconds)">🗑 Delete</button></div>';
   var ids=Object.keys(P.sel);
   var mr=$('#main').getBoundingClientRect(); document.documentElement.style.setProperty('--phL',(window.innerWidth>600?Math.round(mr.left):0)+'px');
   document.documentElement.style.setProperty('--phBarH',bar.firstChild.offsetHeight+'px');
