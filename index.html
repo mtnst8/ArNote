@@ -555,6 +555,10 @@ function pvLock(){var pv=$('#pv');if(!pv)return;var n=G?0:Object.keys(S.sel).len
   $('#pvSelX').onclick=endSelect}
 /** Notes ArNote made from scanning a photo (they can go back to being just a photo). */
 function isScanNote(n){return n&&n.link&&['Document','Receipt','Business Card'].some(function(t){return n.tags.indexOf(t)>=0})}
+/** A scanned-photo note → a real note with the picture in it (keeps its tags, minus Document); the scan note goes away. */
+function noteFromScan(id,btn){var n=S.byId[id];if(!n)return;if(btn){btn.disabled=true;btn.textContent='Making the note…'}
+  call('api_photoToNote',n.docId,n.tags).then(function(r){return call('api_justPhoto',[id]).then(function(){return load(true)}).then(function(){refreshInboxCount();go('note',r.id);setTimeout(function(){var e=$('#ehere');if(e)e.click()},700);toast('Note made: write away. It\'s in your Inbox.')})})
+  .catch(function(){if(btn){btn.disabled=false;btn.textContent='📝 Note with this photo'}})}
 function justPhoto(ids){
   ids=ids.filter(function(id){return isScanNote(S.byId[id])});
   if(!ids.length){toast('None of these were made from a scanned photo');return}
@@ -920,7 +924,7 @@ function renderPv(){
   el.innerHTML='<input id="pvTitle" class="pvtitle" value="'+esc(n.title)+'" title="Click to rename" spellcheck="false">'+
     '<div class="muted" style="font-size:12px">Created '+fmt(n.created)+(n.att?' · 📎'+n.att:'')+'</div>'+
     '<div class="bar" id="tagbar"></div>'+
-    '<div class="bar"><button class="btn primary" id="pvFile">File → Cabinet</button><button class="btn" id="pvOpen">Open / edit</button>'+(n.tags.indexOf('Receipt')>=0?'<button class="btn" id="pvRc">🧾 Receipt details</button>':/mail\.google\.com/.test(n.sourceUrl||'')?'<button class="btn" id="pvMk" title="Read this email as a receipt or invoice">🧾 It\'s a receipt</button>':'')+(isScanNote(n)?'<button class="btn" id="pvJp" title="Not a document, receipt or card: remove this note and put the photo back in Photos">📷 Just a photo</button>':'')+'<button class="btn" id="pvPr">🖨 Print</button><button class="btn" id="pvDn" title="Download as PDF">⇩ Download</button>'+'<button class="btn danger" id="pvDel">Delete</button>'+
+    '<div class="bar"><button class="btn primary" id="pvFile">File → Cabinet</button><button class="btn" id="pvOpen">Open / edit</button>'+(n.tags.indexOf('Receipt')>=0?'<button class="btn" id="pvRc">🧾 Receipt details</button>':/mail\.google\.com/.test(n.sourceUrl||'')?'<button class="btn" id="pvMk" title="Read this email as a receipt or invoice">🧾 It\'s a receipt</button>':'')+(isScanNote(n)?'<button class="btn" id="pvNp" title="A new note with this picture in it, ready for you to write">📝 Note with this photo</button>':'')+(isScanNote(n)?'<button class="btn" id="pvJp" title="Not a document, receipt or card: remove this note and put the photo back in Photos">📷 Just a photo</button>':'')+'<button class="btn" id="pvPr">🖨 Print</button><button class="btn" id="pvDn" title="Download as PDF">⇩ Download</button>'+'<button class="btn danger" id="pvDel">Delete</button>'+
     '<span class="kbd">Keys: ↑ ↓ move · T add tag · F file · Enter open</span></div><div id="pvloc"></div>'+
     (n.tags.indexOf('Receipt')>=0?'<div id="pvRcCard"><p class="muted">Loading receipt…</p></div><div id="pvFull" style="display:none">'+readerHtml()+'</div>':readerHtml());
   renderTags(n);
@@ -936,6 +940,7 @@ function renderPv(){
   $('#pvFile').onclick=function(){fileNote(n.id)};
   $('#pvPr').onclick=function(){printNotes([n.id])};
   if($('#pvJp'))$('#pvJp').onclick=function(){justPhoto([n.id])};
+  if($('#pvNp'))$('#pvNp').onclick=function(){noteFromScan(n.id,this)};
   pvLock();
   $('#pvDn').onclick=function(){downloadNotes([n.id])};
   $('#pvOpen').onclick=function(){go('note',n.id)};
@@ -1549,7 +1554,7 @@ function viewNote(id,keep){
     '<div class="bar">'+
       (n.notebook==='Inbox'?'<button class="btn primary" id="file">File → Cabinet</button>':'<button class="btn" id="unfile">Move to Inbox</button>')+
       (isTriage?'<button class="btn" id="skip">Skip</button>':'')+
-      (n.link?'<a class="btn" target="_blank" id="odocs" href="'+linkUrl(n)+'">Open in Drive ↗</a>'+(isScanNote(n)?'<button class="btn" id="njp">📷 Just a photo</button>':''):
+      (n.link?'<a class="btn" target="_blank" id="odocs" href="'+linkUrl(n)+'">Open in Drive ↗</a>'+(isScanNote(n)?'<button class="btn" id="nnp">📝 Note with this photo</button><button class="btn" id="njp">📷 Just a photo</button>':''):
         '<a class="btn" target="_blank" id="odocs" href="'+docUrl(n.docId,true)+'">Edit in Google Docs ↗</a><button class="btn" id="ehere">Edit here</button>'+
         (n.sourceUrl?'<a class="btn" target="_blank" href="'+esc(n.sourceUrl)+'">'+(/mail\.google\.com/.test(n.sourceUrl)?'Open in Gmail':'Source')+'</a>':'')+(n.tags.indexOf('Receipt')>=0?'<button class="btn" onclick="S.rcData=null;rcDetails(\''+n.id+'\')">🧾 Receipt details</button>':/mail\.google\.com/.test(n.sourceUrl||'')?'<button class="btn" onclick="markReceipt(\''+n.id+'\',this)">🧾 It\'s a receipt</button>':''))+
       '<button class="btn" id="nprint">🖨 Print</button>'+
@@ -1568,6 +1573,7 @@ function viewNote(id,keep){
   $('#nai').onclick=function(){exportForAI([id])};
   $('#ndl').onclick=function(){downloadNotes([id])};
   if($('#njp'))$('#njp').onclick=function(){justPhoto([id])};
+  if($('#nnp'))$('#nnp').onclick=function(){noteFromScan(id,this)};
   if($('#ehere')) $('#ehere').onclick=function(){ $('#ehint').textContent='Editing in Google Docs. Changes save automatically. If this says you need access, use Edit in Google Docs instead (this browser is signed in to a different Google account).';
     $('#nbody').innerHTML='<iframe src="https://docs.google.com/document/d/'+n.docId+'/edit?rm=minimal'+(S.user?'&authuser='+encodeURIComponent(S.user):'')+'" allow="clipboard-read; clipboard-write"></iframe>'; this.remove(); S.editing=id; };
   $('#star').onclick=function(){batch({starred:!n.starred},n.starred?'Bookmark removed':'Bookmarked',[id]);viewNote(id)};

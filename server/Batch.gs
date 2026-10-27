@@ -2591,12 +2591,13 @@ function api_justPhoto(noteIds) {
   } finally { lock.releaseLock(); }
 }
 /** "Note with this photo": a new Inbox note with the picture in it (1600 px copy), a link to the original, the photo's tags, and room to write. */
-function api_photoToNote(fileId) {
+function api_photoToNote(fileId, extraTags) {
   var p = photoRows_().filter(function (x) { return x.id === fileId; })[0];
   var m = JSON.parse(driveGet_(encodeURIComponent(fileId) + '?fields=name,mimeType,thumbnailLink,webViewLink&supportsAllDrives=true').getContentText());
   var d = p && /^\d{4}-\d\d-\d\d/.test(p.taken) ? p.taken.slice(0, 10) : '';
   var title = 'Photo' + (d ? ' — ' + d : '') + (p && p.town ? ' — ' + p.town : '');
   var tags = p ? p.tags.slice() : [];
+  (extraTags || []).forEach(function (t) { if (t && t !== 'Document' && tags.indexOf(t) < 0) tags.push(t); });
   var n = api_createNote(title, '', tags), doc = DocumentApp.openById(n.docId), body = doc.getBody();
   try {
     var img = UrlFetchApp.fetch(String(m.thumbnailLink).replace(/=s\d+$/, '=s1600'), { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
