@@ -1080,7 +1080,7 @@ function exportForAI(ids){
       '<div class="setrow"><button class="btn primary" id="aiDl">⇩ Download .md</button><button class="btn" id="aiCp">Copy text</button></div>'+
       '<textarea readonly id="aiT" style="width:100%;height:180px;margin-top:8px;font:12px monospace;box-sizing:border-box"></textarea>';
     $('#aiT').value=md;
-    $('#aiDl').onclick=function(){var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([md],{type:'text/markdown'}));a.download='ArNote export '+today()+'.md';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1000)};
+    $('#aiDl').onclick=function(){var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([md],{type:'text/markdown'}));a.download=(ids.length===1?String(S.byId[ids[0]].title||'Note').replace(/[\\/:*?"<>|]+/g,' ').slice(0,80).trim():'ArNote export '+today())+'.md';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1000)};
     $('#aiCp').onclick=function(){var t=$('#aiT');(navigator.clipboard?navigator.clipboard.writeText(md):Promise.reject()).then(function(){toast('Copied: paste it into your AI chat')}).catch(function(){t.focus();t.select();try{document.execCommand('copy');toast('Copied')}catch(e){toast('Select the text and copy it')}})};
   }
 }
@@ -1461,6 +1461,7 @@ function viewNote(id,keep){
         '<a class="btn" target="_blank" id="odocs" href="'+docUrl(n.docId,true)+'">Edit in Google Docs ↗</a><button class="btn" id="ehere">Edit here</button>'+
         (n.sourceUrl?'<a class="btn" target="_blank" href="'+esc(n.sourceUrl)+'">'+(/mail\.google\.com/.test(n.sourceUrl)?'Open in Gmail':'Source')+'</a>':'')+(n.tags.indexOf('Receipt')>=0?'<button class="btn" onclick="S.rcData=null;rcDetails(\''+n.id+'\')">🧾 Receipt details</button>':/mail\.google\.com/.test(n.sourceUrl||'')?'<button class="btn" onclick="markReceipt(\''+n.id+'\',this)">🧾 It\'s a receipt</button>':''))+
       '<button class="btn" id="nprint">🖨 Print</button>'+
+      '<button class="btn" id="nai" title="This note as a Markdown file that Claude, ChatGPT or Gemini can read">✦ Export for AI</button>'+
       '<button class="btn danger" id="del">'+(n.link?'Remove link':'Delete')+'</button></div>'+
     '<div id="nloc"></div><div class="atts" id="atts"></div>'+
     '<div class="muted" id="ehint" style="font-size:12px;margin:2px 0 6px">'+(n.link?'🔗 Linked file: it stays where it is in your Drive. Edits happen in the original; removing this note never deletes the file.':'Reading view. To change the text, use Edit in Google Docs (on a phone it opens the Docs app).')+'</div>'+
@@ -1471,6 +1472,7 @@ function viewNote(id,keep){
   if(fr) fr.then(function(d){if(d&&d.atts&&d.atts.length&&$('#atts'))$('#atts').innerHTML=d.atts.map(function(a){return '<a target="_blank" href="'+fileUrl(a.fileId)+'">📎 '+esc(a.filename)+'</a>'}).join('')}).catch(function(){});
   $('#odocs').onclick=function(){S.editing=id};
   $('#nprint').onclick=function(){printNotes([id])};
+  $('#nai').onclick=function(){exportForAI([id])};
   if($('#ehere')) $('#ehere').onclick=function(){ $('#ehint').textContent='Editing in Google Docs. Changes save automatically. If this says you need access, use Edit in Google Docs instead (this browser is signed in to a different Google account).';
     $('#nbody').innerHTML='<iframe src="https://docs.google.com/document/d/'+n.docId+'/edit?rm=minimal'+(S.user?'&authuser='+encodeURIComponent(S.user):'')+'" allow="clipboard-read; clipboard-write"></iframe>'; this.remove(); S.editing=id; };
   $('#star').onclick=function(){batch({starred:!n.starred},n.starred?'Bookmark removed':'Bookmarked',[id]);viewNote(id)};
