@@ -551,7 +551,7 @@ function endSelect(){S.sel={};lastClicked=null;paintSel()}
 function pvLock(){var pv=$('#pv');if(!pv)return;var n=G?0:Object.keys(S.sel).length;pv.classList.toggle('pvlock',n>0);
   var b=$('#pvSelNote');if(!n){if(b)b.remove();return}
   if(!b){b=document.createElement('div');b.id='pvSelNote';b.className='pvsel';pv.insertBefore(b,pv.firstChild)}
-  b.innerHTML='<b>'+n+' selected</b><span>Use the bar at the bottom to tag, file or delete them (T = tags, F = file).</span><span class="grow"></span><button class="btn small" id="pvSelX">Clear selection</button>';
+  b.innerHTML='<b>'+n+' selected</b><span>Tag, file or delete them with the selection bar (T = tags, F = file).</span><span class="grow"></span><button class="btn small" id="pvSelX">Clear selection</button>';
   $('#pvSelX').onclick=endSelect}
 /** Notes ArNote made from scanning a photo (they can go back to being just a photo). */
 function isScanNote(n){return n&&n.link&&['Document','Receipt','Business Card'].some(function(t){return n.tags.indexOf(t)>=0})}
