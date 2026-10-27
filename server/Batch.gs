@@ -577,20 +577,25 @@ var GUIDE_DEFAULT_HTML_ = '<p>ArNote works like a mailbox and a filing cabinet: 
   '<li><b>Photos and files:</b> in the Inbox, tap <b>+ Add files</b> (on a computer you can also drag files onto ArNote). On Android, use <b>Share → ArNote</b> from your gallery or a text.</li>' +
   '<li><b>Email:</b> forward any email to your ArNote address (<b>Settings → Email to ArNote</b>). On iPhone this is also how to send photos from your gallery or a text: <b>Share → Mail</b>.</li>' +
   '<li><b>Receipts and business cards:</b> photos of them are read and tagged for you, ready to check in the Inbox.</li></ul>' +
-  '<h2>2. Tag and file</h2><ul>' +
+  '<h2>2. Already have lots in Google Drive?</h2><ul>' +
+  '<li>Leave it where it is. In the Inbox choose <b>🔗 Link Drive files</b> and pick files or whole folders. ArNote lists them with your notes without moving or copying anything.</li>' +
+  '<li>Tag them like any note, and from then on drill down to them by tag instead of digging through folders.</li>' +
+  '<li>New files that land in a linked folder show up in your Inbox to tag. Manage linked folders under <b>Settings → Linked Drive folders</b>.</li></ul>' +
+  '<h2>3. Tag and file</h2><ul>' +
   '<li>Open a note in your <b>Inbox</b> and add tags. Tags are grouped under <b>Who</b>, <b>What</b>, <b>When</b> and <b>Where</b>; add your own under any of them in <b>Tags</b>.</li>' +
   '<li>Then file it to the <b>Cabinet</b>. To tag several notes at once, tick their checkboxes and choose <b>Tags…</b></li></ul>' +
-  '<h2>3. Find things</h2><ul>' +
+  '<h2>4. Find things</h2><ul>' +
   '<li><b>Search</b> (top left) looks through titles and text.</li>' +
   '<li><b>Tags</b> lets you drill down: tap a tag, then a tag inside it.</li>' +
   '<li><b>Bookmark</b> a note (★) to keep it in <b>Shortcuts</b>.</li></ul>' +
-  '<h2>4. Photos</h2><ul><li><b>Photos</b> is one gallery for all your pictures: browse by tag, or by place on the map.</li></ul>' +
-  '<h2>5. Receipts</h2><ul><li>Give each receipt a <b>Job</b> and an <b>Expense category</b>. <b>Receipts</b> shows them by job and category, billed or not, and prints a clean report.</li></ul>' +
-  '<h2>6. Get help from AI</h2><ul><li>Tick the notes you want help with and choose <b>Export for AI</b>. You get one file (or text to paste) that Claude, ChatGPT or Gemini can read.</li></ul>' +
+  '<h2>5. Photos</h2><ul><li><b>Photos</b> is one gallery for all your pictures: browse by tag, or by place on the map.</li></ul>' +
+  '<h2>6. Receipts</h2><ul><li>Give each receipt a <b>Job</b> and an <b>Expense category</b>. <b>Receipts</b> shows them by job and category, billed or not, and prints a clean report.</li></ul>' +
+  '<h2>7. Get help from AI</h2><ul><li>Tick the notes you want help with and choose <b>Export for AI</b>. You get one file (or text to paste) that Claude, ChatGPT or Gemini can read.</li></ul>' +
   '<p>Your notes are Google Docs in the <b>ArNote</b> folder of your Google Drive, and a backup is made every day. See this guide again any time under <b>Settings → Getting started</b>.</p>';
 var RELEASES_DEFAULT_ = ['Next release',
   '- What\'s new: after each update, ArNote shows you what changed, once (like this).',
   '- Getting started: a short guide to ArNote, under Settings → Getting started.',
+  '- Getting started explains linking what you already keep in Google Drive: leave it there and tag it in ArNote.',
   '- Export for AI: tick some notes and choose Export for AI to get one file that Claude, ChatGPT or Gemini can read, so an AI can help with them.', '',
   'Release 7 · Oct 26, 2026', '- Your ArNote tells its owner which kinds of device it is used on (for example iPhone or Windows), so setup help can be pointed at the right phone. Nothing else about your devices is shared.', '',
   'Release 6 · Oct 26, 2026', '- "Open the app" in the spreadsheet: the address box fits the window.', '',
