@@ -900,7 +900,7 @@ function renderPv(){
   el.innerHTML='<input id="pvTitle" class="pvtitle" value="'+esc(n.title)+'" title="Click to rename" spellcheck="false">'+
     '<div class="muted" style="font-size:12px">Created '+fmt(n.created)+(n.att?' · 📎'+n.att:'')+'</div>'+
     '<div class="bar" id="tagbar"></div>'+
-    '<div class="bar"><button class="btn primary" id="pvFile">File → Cabinet</button><button class="btn" id="pvOpen">Open / edit</button>'+(n.tags.indexOf('Receipt')>=0?'<button class="btn" id="pvRc">🧾 Receipt details</button>':/mail\.google\.com/.test(n.sourceUrl||'')?'<button class="btn" id="pvMk" title="Read this email as a receipt or invoice">🧾 It\'s a receipt</button>':'')+'<button class="btn danger" id="pvDel">Delete</button>'+
+    '<div class="bar"><button class="btn primary" id="pvFile">File → Cabinet</button><button class="btn" id="pvOpen">Open / edit</button>'+(n.tags.indexOf('Receipt')>=0?'<button class="btn" id="pvRc">🧾 Receipt details</button>':/mail\.google\.com/.test(n.sourceUrl||'')?'<button class="btn" id="pvMk" title="Read this email as a receipt or invoice">🧾 It\'s a receipt</button>':'')+'<button class="btn" id="pvPr">🖨 Print</button><button class="btn" id="pvDn" title="Download as PDF">⇩ Download</button>'+'<button class="btn danger" id="pvDel">Delete</button>'+
     '<span class="kbd">Keys: ↑ ↓ move · T add tag · F file · Enter open</span></div><div id="pvloc"></div>'+
     (n.tags.indexOf('Receipt')>=0?'<div id="pvRcCard"><p class="muted">Loading receipt…</p></div><div id="pvFull" style="display:none">'+readerHtml()+'</div>':readerHtml());
   renderTags(n);
@@ -914,6 +914,8 @@ function renderPv(){
     var old=n.title; n.title=v; n.updated=new Date().toISOString(); drawInboxList();
     var p=call('api_updateNote',n.id,{title:v}); undoToast('Renamed',function(){return p.then(function(){n.title=old;return call('api_updateNote',n.id,{title:old})}).then(function(){afterUndo([n.id])})})};
   $('#pvFile').onclick=function(){fileNote(n.id)};
+  $('#pvPr').onclick=function(){printNotes([n.id])};
+  $('#pvDn').onclick=function(){downloadNotes([n.id])};
   $('#pvOpen').onclick=function(){go('note',n.id)};
   if($('#pvRc')) $('#pvRc').onclick=function(){S.rcData=null;rcDetails(n.id)};
   if($('#pvMk')) $('#pvMk').onclick=function(){markReceipt(n.id,this)};
