@@ -577,10 +577,10 @@ var GUIDE_DEFAULT_HTML_ = '<p>ArNote works like a mailbox and a filing cabinet: 
   '<li><b>Photos and files:</b> in the Inbox, tap <b>+ Add files</b> (on a computer you can also drag files onto ArNote). On Android, use <b>Share → ArNote</b> from your gallery or a text.</li>' +
   '<li><b>Email:</b> forward any email to your ArNote address (<b>Settings → Email to ArNote</b>). On iPhone this is also how to send photos from your gallery or a text: <b>Share → Mail</b>.</li>' +
   '<li><b>Receipts and business cards:</b> photos of them are read and tagged for you, ready to check in the Inbox.</li></ul>' +
-  '<h2>2. Already have lots in Google Drive?</h2><ul>' +
+  '<h2>2. Wrangle what\'s already in Google Drive</h2><ul>' +
   '<li>Leave it where it is. In the Inbox choose <b>🔗 Link Drive files</b> and pick files or whole folders. ArNote lists them with your notes without moving or copying anything.</li>' +
-  '<li>Tag them like any note, and from then on drill down to them by tag instead of digging through folders.</li>' +
-  '<li>New files that land in a linked folder show up in your Inbox to tag. Manage linked folders under <b>Settings → Linked Drive folders</b>.</li></ul>' +
+  '<li>Then wrangle them with tags, like any note, and drill down to them by tag instead of digging through folders.</li>' +
+  '<li>New files that land in a linked folder show up in your Inbox to wrangle. Manage linked folders under <b>Settings → Linked Drive folders</b>.</li></ul>' +
   '<h2>3. Tag and file</h2><ul>' +
   '<li>Open a note in your <b>Inbox</b> and add tags. Tags are grouped under <b>Who</b>, <b>What</b>, <b>When</b> and <b>Where</b>; add your own under any of them in <b>Tags</b>.</li>' +
   '<li>Then file it to the <b>Cabinet</b>. To tag several notes at once, tick their checkboxes and choose <b>Tags…</b></li></ul>' +
@@ -595,7 +595,7 @@ var GUIDE_DEFAULT_HTML_ = '<p>ArNote works like a mailbox and a filing cabinet: 
 var RELEASES_DEFAULT_ = ['Next release',
   '- What\'s new: after each update, ArNote shows you what changed, once (like this).',
   '- Getting started: a short guide to ArNote, under Settings → Getting started.',
-  '- Getting started explains linking what you already keep in Google Drive: leave it there and tag it in ArNote.',
+  '- Getting started explains wrangling what you already keep in Google Drive: leave it there and tag it in ArNote.',
   '- Export for AI: tick some notes and choose Export for AI to get one file that Claude, ChatGPT or Gemini can read, so an AI can help with them.', '',
   'Release 7 · Oct 26, 2026', '- Your ArNote tells its owner which kinds of device it is used on (for example iPhone or Windows), so setup help can be pointed at the right phone. Nothing else about your devices is shared.', '',
   'Release 6 · Oct 26, 2026', '- "Open the app" in the spreadsheet: the address box fits the window.', '',
@@ -692,6 +692,29 @@ function adminDocPublic_(kind) {
   return res;
 }
 
+/** Owner (used by Claude for wording fixes): exact-text replacements in one of these notes, and/or lines added under "Next release".
+ * edits = { replace: [[find, with], …], next: ['- line', …] }. Returns how many replacements were made. */
+function api_adminEdit(kind, edits) {
+  if (!isLicenceServer_()) throw new Error('Only the owner can edit this');
+  api_adminNote(kind); edits = edits || {};
+  var doc = DocumentApp.openById(adminDocId_(kind)), body = doc.getBody(), done = 0;
+  var rx = function (x) { return String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); };
+  (edits.replace || []).forEach(function (r) {
+    var n = body.getText().split(String(r[0])).length - 1;
+    if (n) { body.replaceText(rx(r[0]), String(r[1]).replace(/\$/g, '$$$$')); done += n; }
+  });
+  if (edits.next && edits.next.length && kind === 'releases') {
+    var kids = body.getNumChildren(), at = -1;
+    for (var i = 0; i < kids; i++) { var c = body.getChild(i); if (c.getType() === DocumentApp.ElementType.PARAGRAPH && /^\s*Next release\s*$/i.test(c.asParagraph().getText())) { at = i; break; } }
+    if (at < 0) { body.insertParagraph(1, 'Next release'); at = 1; }
+    var pos = at + 1;   // after the existing Next release lines
+    while (pos < body.getNumChildren()) { var t = body.getChild(pos); if (t.getType() !== DocumentApp.ElementType.PARAGRAPH) break; var tx = t.asParagraph().getText(); if (/^\s*Release\s+\d+/i.test(tx) || !tx.trim()) break; pos++; }
+    edits.next.forEach(function (l, k) { body.insertParagraph(pos + k, String(l)).setHeading(DocumentApp.ParagraphHeading.NORMAL); });
+  }
+  doc.saveAndClose();
+  try { CacheService.getScriptCache().remove('adm_' + kind); } catch (e) {}
+  return { replaced: done };
+}
 /* ---------- Release notes: "Next release" lines become the release's What's new ---------- */
 function releasesText_() {
   var docId = adminDocId_('releases'); if (!docId) return RELEASES_DEFAULT_;
@@ -792,7 +815,7 @@ var INVITE_DEFAULT_ = ['Subject: You\'re invited to ArNote', '',
   '- Photos: one gallery you can drill into by tag or by place on a map.',
   '- Receipts: tag by job and expense category, mark billed / not billed, print a clean report.',
   '- Email in: forward any email (receipts, invoices, anything) to your ArNote address and it lands in your Inbox to tag.',
-  '- Already keep lots in Google Drive? Leave it where it is and tag it in ArNote, so you can drill down to it by tag.',
+  '- Already keep lots in Google Drive? Leave it where it is and wrangle it with tags in ArNote, so you can drill down to it.',
   '- Works with AI: tick some notes and export them as one Markdown file that Claude, ChatGPT or Gemini can read, so an AI can help you with them.',
   '- Daily backup, and new features show up on their own.', '',
   'Start here (about 10 minutes, best on a computer; you\'ll need a Google account, a free Gmail is fine):',
