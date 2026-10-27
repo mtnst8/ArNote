@@ -2451,10 +2451,10 @@ function classifyText_(text) {
     if (cf.name || (phone && email)) return { kind: 'card', fields: cf };
   }
   var inSentences = lines.reduce(function (n, l) { var w = (l.match(/[A-Za-z]{2,}/g) || []).length; return n + (w >= 5 ? w : 0); }, 0);   // pages are full lines/paragraphs; screenshots are scattered words
-  if (words >= 40 && inSentences >= words * 0.6) return { kind: 'document', fields: {} };
-  var tokens = words + (all.match(/\d+/g) || []).length;
-  if (lines.length >= 4 && tokens >= 20) return { kind: 'document', fields: {} };   // mostly words and numbers: screenshots, labels, forms, invitations
-  if (phone || email || web) return { kind: 'document', fields: {} };              // has an address or number worth keeping (a ticket, a sign with a website)
+  // A document is a page of reading: 80+ words with at least half in full lines (a letter, a manual page), or 150+ words of any kind.
+  // Signs, screenshots, labels, shirts and the odd phone number stay plain photos ("Just a photo" undoes any miss).
+  if (words >= 80 && inSentences >= words * 0.5) return { kind: 'document', fields: {} };
+  if (words >= 150) return { kind: 'document', fields: {} };
   return { kind: 'photo', fields: {} };
 }
 
@@ -2555,6 +2555,45 @@ function cardFields_(lines, email, phone, web) {
   return { name: tidy(name), business: business, email: email ? email[0] : '', phone: phone ? phone[0] : '' };
 }
 
+/** "Just a photo": a note made from a scanned photo goes away; the photo returns to the gallery and is never scanned into a note again. */
+function api_justPhoto(noteIds) {
+  var lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    var want = {}; (noteIds || []).forEach(function (id) { want[id] = 1; });
+    var nsh = ss_().getSheetByName('Notes'), nv = nsh.getDataRange().getValues(), head = nv[0];
+    var cId = head.indexOf('id'), cDoc = head.indexOf('docId'), cSrc = head.indexOf('source'), files = {}, rows = [];
+    for (var i = 1; i < nv.length; i++) if (want[nv[i][cId]] && nv[i][cSrc] === 'link') { files[String(nv[i][cDoc])] = nv[i][cId]; rows.push(i + 1); }
+    var psh = photoSheet_(), pv = psh.getDataRange().getValues(), sc = PHOTO_COLS.indexOf('scan'), st = PHOTO_COLS.indexOf('status'), photos = 0, keep = {};
+    for (var j = 1; j < pv.length; j++) if (files[pv[j][0]] !== undefined) { pv[j][sc] = 'photo'; pv[j][st] = ''; photos++; keep[files[pv[j][0]]] = 1; }
+    if (photos) psh.getRange(1, 1, pv.length, pv[0].length).setValues(pv);
+    rows = rows.filter(function (r) { return keep[nv[r - 1][cId]]; });     // only notes that really were made from a photo
+    rows.sort(function (a, b) { return b - a; }).forEach(function (r) { nsh.deleteRow(r); });
+    var rsh = receiptSheet_(), rv = rsh.getDataRange().getValues(), rn = RECEIPT_COLS.indexOf('noteId');
+    for (var k = rv.length - 1; k >= 1; k--) if (keep[rv[k][rn]]) rsh.deleteRow(k + 1);
+    return { done: rows.length };
+  } finally { lock.releaseLock(); }
+}
+/** "Note with this photo": a new Inbox note with the picture in it (1600 px copy), a link to the original, the photo's tags, and room to write. */
+function api_photoToNote(fileId) {
+  var p = photoRows_().filter(function (x) { return x.id === fileId; })[0];
+  var m = JSON.parse(driveGet_(encodeURIComponent(fileId) + '?fields=name,mimeType,thumbnailLink,webViewLink&supportsAllDrives=true').getContentText());
+  var d = p && /^\d{4}-\d\d-\d\d/.test(p.taken) ? p.taken.slice(0, 10) : '';
+  var title = 'Photo' + (d ? ' — ' + d : '') + (p && p.town ? ' — ' + p.town : '');
+  var tags = p ? p.tags.slice() : [];
+  var n = api_createNote(title, '', tags), doc = DocumentApp.openById(n.docId), body = doc.getBody();
+  try {
+    var img = UrlFetchApp.fetch(String(m.thumbnailLink).replace(/=s\d+$/, '=s1600'), { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+    if (img.getResponseCode() === 200) {
+      var par = body.appendParagraph(''), im = par.appendInlineImage(img.getBlob());
+      var w = im.getWidth(), h = im.getHeight(), mw = 480; if (w > mw) { im.setWidth(mw); im.setHeight(Math.round(h * mw / w)); }
+    }
+  } catch (e) {}
+  body.appendParagraph('Original photo: ').appendText(m.name || 'open').setLinkUrl(m.webViewLink || ('https://drive.google.com/file/d/' + fileId + '/view'));
+  body.appendParagraph('');
+  try { var c1 = body.getChild(1); if (c1.getType() === DocumentApp.ElementType.PARAGRAPH && !c1.asParagraph().getText() && body.getNumChildren() > 3 && c1.asParagraph().getNumChildren() === 0) body.removeChild(c1); } catch (e) {}
+  doc.saveAndClose();
+  return { id: n.id };
+}
 /** A note in the Inbox that points at the photo (no copy). */
 function photoNote_(fileId, title, tags) {
   var now = new Date(), id = Utilities.getUuid();
