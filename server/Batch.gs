@@ -1464,6 +1464,36 @@ function api_mailReceiptFor(noteIds, force) {
 /* ---------------- Print ----------------
  * Google Docs (notes and linked Docs) are combined into one PDF; other files come back as their own PDF/file.
  */
+/* ---------- Downloads: the app pulls original files in 6 MB pieces (works for big videos too) ---------- */
+var DL_CHUNK_ = 6 * 1024 * 1024;
+function driveGet_(path, headers) {
+  return UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + path, { headers: Object.assign({ Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, headers || {}), muteHttpExceptions: true });
+}
+/** Name, type and size of each file (photos, videos, attachments). */
+function api_dlMeta(ids) {
+  return (ids || []).slice(0, 500).map(function (id) {
+    var r = driveGet_(encodeURIComponent(id) + '?fields=id,name,mimeType,size&supportsAllDrives=true');
+    if (r.getResponseCode() !== 200) return { id: id, error: 'not found' };
+    var m = JSON.parse(r.getContentText());
+    return { id: id, name: m.name, mime: m.mimeType, size: +m.size || 0, google: /^application\/vnd\.google-apps\./.test(m.mimeType) };
+  });
+}
+/** One piece of a file: {b64, size, next} — next is null when this was the last piece. */
+function api_dlChunk(id, offset) {
+  offset = +offset || 0;
+  var r = driveGet_(encodeURIComponent(id) + '?alt=media&supportsAllDrives=true', { Range: 'bytes=' + offset + '-' + (offset + DL_CHUNK_ - 1) });
+  var c = r.getResponseCode(); if (c !== 200 && c !== 206) throw new Error('Could not read the file (' + c + ')');
+  var bytes = r.getContent(), h = r.getAllHeaders(), cr = String(h['Content-Range'] || h['content-range'] || ''), m = cr.match(/\/(\d+)$/);
+  var size = m ? +m[1] : offset + bytes.length, end = offset + bytes.length;
+  return { b64: Utilities.base64Encode(bytes), size: size, next: end < size ? end : null };
+}
+/** A note as a PDF (same layout as Print), plus its attachments' file ids for the app to fetch. Linked non-Google files come back as their original file. */
+function api_notePdf(id) {
+  var r = api_printPdf([id]), f = (r.files || [])[0] || {};
+  var atts = readTable_('Attachments').filter(function (a) { return a.noteId === id; }).map(function (a) { return { id: a.fileId, name: String(a.filename) }; });
+  if (f.tooBig || f.error) { var n = readTable_('Notes').filter(function (x) { return x.id === id; })[0]; return { fileId: n && n.docId, name: f.name, atts: atts }; }
+  return { name: f.name, mime: f.mime, b64: f.b64, atts: atts };
+}
 function exportPdf_(id) {
   var r = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + id + '/export?mimeType=application/pdf',
     { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });

@@ -360,6 +360,7 @@ body.guest #actbar,body.guest .row .nb{display:none!important}
   <button class="btn small" id="aUnstar">☆ Remove bookmark</button>
   <button class="btn small" id="aMerge">⇲ Merge</button>
   <button class="btn small" id="aPrint">🖨 Print</button>
+  <button class="btn small" id="aDl" title="Download as PDF">⇩ Download</button>
   <button class="btn small" id="aAI" title="One Markdown file of the selected notes that Claude, ChatGPT or Gemini can read">✦ Export for AI</button>
   <button class="btn small danger" id="aDel">Delete</button>
   <button class="btn small" id="aDone">Clear</button>
@@ -577,6 +578,7 @@ $('#aDel').onclick=function(){
 };
 $('#aPrint').onclick=function(){printNotes(Object.keys(S.sel))};
 $('#aAI').onclick=function(){exportForAI(Object.keys(S.sel))};
+$('#aDl').onclick=function(){downloadNotes(Object.keys(S.sel))};
 $('#aMerge').onclick=function(){
   var ids=Object.keys(S.sel).filter(function(id){return S.byId[id]});
   if(ids.length<2){toast('Select two or more notes to merge');return}
@@ -1084,6 +1086,70 @@ function exportForAI(ids){
     $('#aiCp').onclick=function(){var t=$('#aiT');(navigator.clipboard?navigator.clipboard.writeText(md):Promise.reject()).then(function(){toast('Copied: paste it into your AI chat')}).catch(function(){t.focus();t.select();try{document.execCommand('copy');toast('Copied')}catch(e){toast('Select the text and copy it')}})};
   }
 }
+/* ---------- Downloads: originals of photos/videos, notes as PDF; several at once → share to phone or one .zip ---------- */
+function b64Bytes(b){var s=atob(b),a=new Uint8Array(s.length);for(var i=0;i<s.length;i++)a[i]=s.charCodeAt(i);return a}
+function loadZip(){return window.JSZip?Promise.resolve(window.JSZip):new Promise(function(res,rej){var x=document.createElement('script');x.src='https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';x.onload=function(){res(window.JSZip)};x.onerror=function(){rej(new Error('Could not load the zip tool; check your connection'))};document.head.appendChild(x)})}
+function safeName(n){return String(n||'file').replace(/[\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim().slice(0,120)||'file'}
+function isPhone(){return /iPhone|iPad|Android/.test(navigator.userAgent)||(/Macintosh/.test(navigator.userAgent)&&navigator.maxTouchPoints>1)}
+function mb(n){return (n/1048576).toFixed(n<10485760?1:0)+' MB'}
+/** jobs: [{path, id?, size?, mime?, bytes?}] → fetch, then offer Save to phone / Download. */
+function dlRun(title,jobs,zipName){
+  var total=jobs.reduce(function(a,j){return a+(+j.size||0)},0), lim=isPhone()?300*1048576:800*1048576;
+  if(total>lim){toast('That\'s '+mb(total)+': select fewer at a time (up to '+mb(lim)+' on this device)');return}
+  modal(title,'','<div id="dlw"><p class="muted" id="dlp">Getting files ready…</p></div>','<span class="grow"></span><button class="btn" id="dlC">Close</button>');
+  var stop=false; $('#dlC').onclick=function(){stop=true;closeModal()};
+  var got=0, files=[];
+  var prog=function(){var e=$('#dlp');if(e)e.textContent='Downloading '+(files.length+1>jobs.length?jobs.length:files.length+1)+' of '+jobs.length+(total?' · '+mb(got)+' of '+mb(total):'')+'…'};
+  (function next(i){
+    if(stop) return; if(i>=jobs.length) return ready();
+    var j=jobs[i]; prog();
+    var p=j.bytes?Promise.resolve([j.bytes]):(function(){var parts=[];function step(off){return call('api_dlChunk',j.id,off).then(function(r){if(stop)return;var u=b64Bytes(r.b64);parts.push(u);got+=u.length;prog();return r.next!=null?step(r.next):null})}return step(0).then(function(){return parts})})();
+    p.then(function(parts){if(stop)return;if(j.bytes)got+=j.bytes.length;files.push(new File(parts,j.path.split('/').pop(),{type:j.mime||'application/octet-stream'}));files[files.length-1]._path=j.path;next(i+1)}).catch(function(e){var w=$('#dlw');if(w)w.innerHTML='<p class="err">'+esc(e.message)+'</p>'});
+  })(0);
+  function save(blob,name){var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},4000)}
+  function zip(){var b=$('#dlZ');if(b){b.disabled=true;b.textContent='Zipping…'}
+    return loadZip().then(function(Z){var z=new Z(),seen={};files.forEach(function(f){var pth=f._path,k=pth.toLowerCase(),n=1;while(seen[k]){n++;pth=f._path.replace(/(\.[^./]*)?$/,' ('+n+')$1');k=pth.toLowerCase()}seen[k]=1;z.file(pth,f)});
+      return z.generateAsync({type:'blob',compression:'STORE'})}).then(function(blob){save(blob,zipName+'.zip');if(b){b.disabled=false;b.textContent='⇩ Download .zip'}}).catch(function(e){toast(e.message)})}
+  function ready(){var w=$('#dlw');if(!w)return;
+    var share=isPhone()&&navigator.canShare&&files.length<=10&&(function(){try{return navigator.canShare({files:files})}catch(e){return false}})();
+    var one=files.length===1&&files[0]._path.indexOf('/')<0;
+    w.innerHTML='<p style="margin:0 0 8px">Ready: '+files.length+' file'+(files.length>1?'s':'')+(got?' · '+mb(got):'')+'.'+(share?' <b>Save to phone</b> opens your phone\'s share menu: choose <b>Save Image</b> (or Save to Files).':'')+'</p><div class="setrow">'+
+      (share?'<button class="btn primary" id="dlS">📲 Save to phone</button>':'')+
+      (one?'<button class="btn'+(share?'':' primary')+'" id="dlD">⇩ Download</button>':'<button class="btn'+(share?'':' primary')+'" id="dlZ">⇩ Download .zip</button>')+'</div>';
+    if($('#dlS'))$('#dlS').onclick=function(){navigator.share({files:files}).catch(function(e){if(e&&e.name!=='AbortError')toast('Couldn\'t share: '+e.message)})};
+    if($('#dlD'))$('#dlD').onclick=function(){save(files[0],files[0].name)};
+    if($('#dlZ'))$('#dlZ').onclick=zip;
+    if(!share){if(one)save(files[0],files[0].name);else zip()}
+  }
+}
+function downloadPhotos(ids){
+  ids=ids.filter(Boolean); if(!ids.length) return;
+  toast('Getting file details…');
+  call('api_dlMeta',ids).then(function(m){
+    var ok=m.filter(function(x){return !x.error&&!x.google});
+    if(!ok.length){toast('Nothing to download');return}
+    dlRun('Download '+ok.length+' photo'+(ok.length>1?'s':''),ok.map(function(x){return {path:safeName(x.name),id:x.id,size:x.size,mime:x.mime}}),'ArNote photos '+today());
+  });
+}
+function downloadNotes(ids){
+  ids=ids.filter(function(id){return S.byId[id]}); if(!ids.length) return;
+  if(ids.length>50){toast('Up to 50 notes at a time');return}
+  modal('Download '+ids.length+' note'+(ids.length>1?'s':'')+' as PDF','','<p class="muted" id="dnp">Making PDFs… 0 of '+ids.length+'</p>','<span class="grow"></span><button class="btn" id="dnC">Close</button>');
+  var stop=false; $('#dnC').onclick=function(){stop=true;closeModal()};
+  var jobs=[], i=0, multi=ids.length>1;
+  (function next(){
+    if(stop) return;
+    if(i>=ids.length){closeModal();dlRun('Download '+ids.length+' note'+(ids.length>1?'s':''),jobs,ids.length>1?'ArNote notes '+today():safeName(S.byId[ids[0]].title));return}
+    var id=ids[i];
+    call('api_notePdf',id).then(function(r){
+      var base=safeName(S.byId[id].title), withAtts=r.atts&&r.atts.length, dir=(multi||withAtts)?'':'';
+      if(r.b64) jobs.push({path:base+'.pdf',bytes:b64Bytes(r.b64),mime:'application/pdf'});
+      else if(r.fileId) jobs.push({path:safeName(r.name||base),id:r.fileId});
+      (r.atts||[]).forEach(function(a){jobs.push({path:base+' files/'+safeName(a.name),id:a.id})});
+      i++; var e=$('#dnp'); if(e) e.textContent='Making PDFs… '+i+' of '+ids.length; next();
+    }).catch(function(e){var p=$('#dnp');if(p)p.textContent=e.message});
+  })();
+}
 /* ---------- help text kept by Brian as notes (read from his ArNote; public how-to) ---------- */
 function adminDoc(kind){return invCall({inv:'doc',kind:kind})}
 function showGuide(first){
@@ -1461,6 +1527,7 @@ function viewNote(id,keep){
         '<a class="btn" target="_blank" id="odocs" href="'+docUrl(n.docId,true)+'">Edit in Google Docs ↗</a><button class="btn" id="ehere">Edit here</button>'+
         (n.sourceUrl?'<a class="btn" target="_blank" href="'+esc(n.sourceUrl)+'">'+(/mail\.google\.com/.test(n.sourceUrl)?'Open in Gmail':'Source')+'</a>':'')+(n.tags.indexOf('Receipt')>=0?'<button class="btn" onclick="S.rcData=null;rcDetails(\''+n.id+'\')">🧾 Receipt details</button>':/mail\.google\.com/.test(n.sourceUrl||'')?'<button class="btn" onclick="markReceipt(\''+n.id+'\',this)">🧾 It\'s a receipt</button>':''))+
       '<button class="btn" id="nprint">🖨 Print</button>'+
+      '<button class="btn" id="ndl" title="Download as PDF">⇩ Download</button>'+
       '<button class="btn" id="nai" title="This note as a Markdown file that Claude, ChatGPT or Gemini can read">✦ Export for AI</button>'+
       '<button class="btn danger" id="del">'+(n.link?'Remove link':'Delete')+'</button></div>'+
     '<div id="nloc"></div><div class="atts" id="atts"></div>'+
@@ -1473,6 +1540,7 @@ function viewNote(id,keep){
   $('#odocs').onclick=function(){S.editing=id};
   $('#nprint').onclick=function(){printNotes([id])};
   $('#nai').onclick=function(){exportForAI([id])};
+  $('#ndl').onclick=function(){downloadNotes([id])};
   if($('#ehere')) $('#ehere').onclick=function(){ $('#ehint').textContent='Editing in Google Docs. Changes save automatically. If this says you need access, use Edit in Google Docs instead (this browser is signed in to a different Google account).';
     $('#nbody').innerHTML='<iframe src="https://docs.google.com/document/d/'+n.docId+'/edit?rm=minimal'+(S.user?'&authuser='+encodeURIComponent(S.user):'')+'" allow="clipboard-read; clipboard-write"></iframe>'; this.remove(); S.editing=id; };
   $('#star').onclick=function(){batch({starred:!n.starred},n.starred?'Bookmark removed':'Bookmarked',[id]);viewNote(id)};
@@ -2249,7 +2317,7 @@ function phPaint(){
   var recent=(store('recentTags')||[]).filter(function(t){return S.parent.hasOwnProperty(t)}).slice(0,6);
   bar.innerHTML='<div class="phbar"><b>'+n+' selected</b><span class="tagbox"><input id="pbIn" placeholder="Type a tag + Enter" autocomplete="off"><div class="tagsug" id="pbSug"></div></span>'+
     recent.map(function(t){return '<button class="chip" data-rt="'+esc(t)+'">+ '+esc(t)+'</button>'}).join('')+
-    '<button class="btn small" id="pbTag">Tags…</button><button class="btn small" id="pbScan" title="Read receipts, business cards and documents">🧾 Scan</button><button class="btn small" id="pbDel" title="Move to Drive trash (Undo for a few seconds)">🗑 Delete</button><button class="btn small" id="pbClr" title="Esc">Clear</button></div>';
+    '<button class="btn small" id="pbTag">Tags…</button><button class="btn small" id="pbScan" title="Read receipts, business cards and documents">🧾 Scan</button><button class="btn small" id="pbDl" title="Download the originals">⇩ Download</button><button class="btn small" id="pbDel" title="Move to Drive trash (Undo for a few seconds)">🗑 Delete</button><button class="btn small" id="pbClr" title="Esc">Clear</button></div>';
   var ids=Object.keys(P.sel);
   var mr=$('#main').getBoundingClientRect(); document.documentElement.style.setProperty('--phL',(window.innerWidth>600?Math.round(mr.left):0)+'px');
   document.documentElement.style.setProperty('--phBarH',bar.firstChild.offsetHeight+'px');
@@ -2260,6 +2328,7 @@ function phPaint(){
   $('#pbClr').onclick=function(){P.sel={};phPaint()};
   $('#pbScan').onclick=function(){phScan(ids)};
   $('#pbDel').onclick=function(){phDelete(ids)};
+  $('#pbDl').onclick=function(){downloadPhotos(ids)};
 }
 /** Add photos/videos from this device: anything already in ArNote (same name and size) is skipped; the rest go straight to Drive (ArNote Photos/Phone). */
 function phAddFiles(files){
@@ -2440,7 +2509,7 @@ function phViewer(id,swapping){
   v.innerHTML='<div class="top"><b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50vw">'+esc(p.name)+'</b><span style="opacity:.7;font-size:13px">'+(d&&!isNaN(d)?d.toLocaleDateString(undefined,{weekday:'short',year:'numeric',month:'short',day:'numeric'}):'')+(p.folder?' · '+esc(p.folder):'')+'</span><span id="pvLoc" class="pvloc"></span><span class="grow"></span><span id="pvInfo" style="opacity:.6;font-size:12px"></span><a class="btn small" id="pvOpen" target="_blank" href="https://drive.google.com/file/d/'+encodeURIComponent(id)+'/view'+(S.user?'?authuser='+encodeURIComponent(S.user):'')+'">Open in Drive ↗</a><button class="btn small" id="pvX">✕</button></div>'+
     '<div class="img">'+(isVid?'<iframe id="pvVid" src="https://drive.google.com/file/d/'+encodeURIComponent(id)+'/preview'+(S.user?'?authuser='+encodeURIComponent(S.user):'')+'" allow="autoplay; fullscreen" allowfullscreen></iframe>':'<img id="pvImg" src="'+(P.thumbs[id]||phThumbUrl(id,400))+'">')+(i>0?'<button class="nav l" id="pvL">‹</button>':'')+(i<flat.length-1?'<button class="nav r" id="pvR">›</button>':'')+'</div>'+
     '<div class="bot"><span id="pvTags"></span><span class="tagbox"><input id="pvIn" placeholder="Add tag (T)" autocomplete="off"><div class="tagsug" id="pvSug"></div></span><span id="pvRec"></span>'+
-    '<button class="btn small" id="pvDel" title="Delete (Del)">🗑 Delete</button></div>';
+    '<button class="btn small" id="pvDl" title="Download the original">⇩ Download</button><button class="btn small" id="pvDel" title="Delete (Del)">🗑 Delete</button></div>';
   document.body.appendChild(v);
   function tags(){var q=P.byId[id];$('#pvTags').innerHTML=q.tags.map(function(t){return '<button class="chip" data-x="'+esc(t)+'" title="Remove">'+esc(t)+' ✕</button>'}).join(' ');
     $$('#pvTags [data-x]').forEach(function(b){b.onclick=function(){phUpdate([id],{removeTags:[b.dataset.x]},'Removed “'+b.dataset.x+'”',tags)}});
@@ -2478,6 +2547,7 @@ function phViewer(id,swapping){
   $('#pvX').onclick=close; if($('#pvL'))$('#pvL').onclick=function(){go2(i-1)}; if($('#pvR'))$('#pvR').onclick=function(){go2(i+1)};
   var sx=null; $('#phv .img').addEventListener('touchstart',function(e){sx=e.touches[0].clientX},{passive:true});
   $('#phv .img').addEventListener('touchend',function(e){if(sx==null)return;var dx=e.changedTouches[0].clientX-sx;sx=null;if(Math.abs(dx)>60)go2(dx<0?i+1:i-1)});
+  $('#pvDl').onclick=function(){downloadPhotos([id])};
   $('#pvDel').onclick=function(){var nextI=i;phDelete([id]);var f=phFlat();if(!f.length){close();return}swap();phViewer(f[Math.min(nextI,f.length-1)].id,true)};
 }
 
