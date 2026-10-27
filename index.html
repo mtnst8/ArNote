@@ -639,6 +639,7 @@ function batch(ch,msg,ids,noUndo){
     (ch.addTags||[]).forEach(function(t){if(n.tags.indexOf(t)<0)n.tags.push(t)});
     if(ch.notebook&&!(ch.notebook==='Cabinet'&&!n.tags.length))n.notebook=ch.notebook;
     n.updated=new Date().toISOString();});
+  if(ch.notebook) ids.forEach(function(id){var n=S.byId[id];if(n&&n.notebook===ch.notebook)delete S.sel[id]});   // filed/moved notes leave the list, so they leave the selection too
   refreshInboxCount(); if(S.view!=='note') {rerender(); paintSel();}
   var p=call('api_batchUpdate',ids,ch);
   if(!noUndo&&msg) undoToast(msg+(ids.length>1?' ('+ids.length+')':''),function(){return p.then(function(){return undoBatch(before)})});
