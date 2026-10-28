@@ -2312,9 +2312,9 @@ function phLoadSec(i){
   if(s.items) return Promise.resolve(); if(s.p) return s.p;
   var q=phQ(); if(s.k){q.year=s.k.slice(0,4);q.month=s.k.slice(5,7)} else q.undated=true; q.limit=1500;
   return s.p=call('api_photos',q).then(function(r){ if(gen!==P.gen) return;
-    s.items=r.items; r.items.forEach(function(p){P.byId[p.id]=p});
+    var once={}; s.items=r.items.filter(function(p){if(once[p.id])return false;once[p.id]=1;return true}); s.items.forEach(function(p){P.byId[p.id]=p});
     var g=document.querySelector('#phTL .phsec[data-i="'+i+'"] .phgrid'); if(!g) return;
-    g.innerHTML=r.items.map(phCell).join(''); g.style.minHeight=''; phBind(g); phPaint();
+    g.innerHTML=s.items.map(phCell).join(''); g.style.minHeight=''; phBind(g); phPaint();
   }).catch(function(){s.p=null});
 }
 function phFlat(){var out=[];P.secs.forEach(function(s){if(s.items)out=out.concat(s.items)});return out}
@@ -2352,7 +2352,7 @@ function phPaint(){
   var recent=(store('recentTags')||[]).filter(function(t){return S.parent.hasOwnProperty(t)}).slice(0,6);
   bar.innerHTML='<div class="phbar"><b>'+n+' selected</b><button class="btn small" id="pbClr" title="Clear selection (Esc)">✕ Clear selection</button><span class="tagbox"><input id="pbIn" placeholder="Type a tag + Enter" autocomplete="off"><div class="tagsug" id="pbSug"></div></span>'+
     recent.map(function(t){return '<button class="chip" data-rt="'+esc(t)+'">+ '+esc(t)+'</button>'}).join('')+
-    '<button class="btn small" id="pbTag">Tags…</button><button class="btn small" id="pbScan" title="Read receipts, business cards and documents">🧾 Scan</button><button class="btn small" id="pbDl" title="Download the originals">⇩ Download</button><button class="btn small" id="pbDel" title="Move to Drive trash (Undo for a few seconds)">🗑 Delete</button></div>';
+    '<button class="btn small" id="pbTag">Tags…</button><button class="btn small" id="pbScan" title="Read receipts, business cards and documents">🧾 Scan</button><button class="btn small" id="pbNote" title="One new note with all the selected photos in it, ready for you to write">📝 Note with '+(n>1?'these photos':'this photo')+'</button><button class="btn small" id="pbDl" title="Download the originals">⇩ Download</button><button class="btn small" id="pbDel" title="Move to Drive trash (Undo for a few seconds)">🗑 Delete</button></div>';
   var ids=Object.keys(P.sel);
   var mr=$('#main').getBoundingClientRect(); document.documentElement.style.setProperty('--phL',(window.innerWidth>600?Math.round(mr.left):0)+'px');
   document.documentElement.style.setProperty('--phBarH',bar.firstChild.offsetHeight+'px');
@@ -2364,6 +2364,8 @@ function phPaint(){
   $('#pbScan').onclick=function(){phScan(ids)};
   $('#pbDel').onclick=function(){phDelete(ids)};
   $('#pbDl').onclick=function(){downloadPhotos(ids)};
+  $('#pbNote').onclick=function(){if(ids.length>20){toast('Up to 20 photos in one note');return}var b=this;b.disabled=true;b.textContent='Making the note…';
+    call('api_photoToNote',ids).then(function(r){P.sel={};return load(true).then(function(){go('note',r.id);setTimeout(function(){var e=$('#ehere');if(e)e.click()},700);toast('Note made with '+ids.length+' photo'+(ids.length>1?'s':'')+': write away. It\'s in your Inbox.')})}).catch(function(){b.disabled=false;b.textContent='📝 Note with these photos'})};
 }
 /** Add photos/videos from this device: anything already in ArNote (same name and size) is skipped; the rest go straight to Drive (ArNote Photos/Phone). */
 function phAddFiles(files){
