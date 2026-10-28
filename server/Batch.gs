@@ -238,6 +238,7 @@ function processDrop() {
     }
     try { made = made.concat(processLinks_(start)); } catch (e) { Logger.log('Links: ' + e); }
     try { syncPhotos_(Date.now() - 60000); } catch (e) { Logger.log('Photos: ' + e); }
+    try { photoIdDedupe_(); } catch (e) {}
     try { if (Date.now() - start < 200000) processMail_(Date.now(), 40000); } catch (e) { Logger.log('Mail: ' + e); }
     try { scanQueue_(90000); } catch (e) { Logger.log('Scan: ' + e); }
     try { licenceDaily_(); } catch (e) { Logger.log('Licence: ' + e); }
@@ -2261,7 +2262,24 @@ function api_geoRun() {
   try { return geoWork_(Date.now(), 200000); } finally { lock.releaseLock(); }
 }
 
-function api_photoSyncNow() { var r = syncPhotos_(Date.now() - 180000); return r; }   // ~60 seconds from the app
+function api_photoSyncNow() {          // same lock as uploads and the 15-minute sync, so a photo can't be indexed twice
+  var lock = LockService.getScriptLock(); if (!lock.tryLock(30000)) return { added: 0, complete: false };
+  try { var r = syncPhotos_(Date.now() - 180000); try { photoIdDedupe_(); } catch (e) {} return r; } finally { lock.releaseLock(); }
+}
+/** The same Drive file indexed twice (two rows, one photo): keep the first row, with both rows' tags. */
+function photoIdDedupe_() {
+  var sh = photoSheet_(), v = sh.getDataRange().getValues(), tg = PHOTO_COLS.indexOf('tags'), first = {}, drop = [];
+  for (var i = 1; i < v.length; i++) {
+    var id = String(v[i][0]); if (!id) continue;
+    if (first[id] === undefined) { first[id] = i; continue; }
+    var keep = v[first[id]], a = splitTags_(keep[tg]);
+    splitTags_(v[i][tg]).forEach(function (t) { if (a.indexOf(t) < 0) a.push(t); });
+    if (a.join(TAG_SEP) !== String(keep[tg])) sh.getRange(first[id] + 1, tg + 1).setValue(a.join(TAG_SEP));
+    drop.push(i + 1);
+  }
+  drop.reverse().forEach(function (r) { sh.deleteRow(r); });
+  return drop.length;
+}   // ~60 seconds from the app
 
 function photoRows_() {
   var sh = photoSheet_(), v = sh.getDataRange().getValues(); v.shift();
@@ -2297,6 +2315,7 @@ function api_photos(o) {
   });
   list.sort(function (a, b) { return a.taken < b.taken ? 1 : a.taken > b.taken ? -1 : 0; });
   var off = +o.offset || 0, lim = Math.min(+o.limit || 120, 1500);
+  var once = {}; list = list.filter(function (p) { if (once[p.id]) return false; once[p.id] = 1; return true; });
   return { total: list.length, offset: off, items: list.slice(off, off + lim).map(function (p) { delete p.row; return p; }) };
 }
 
@@ -2595,25 +2614,34 @@ function api_justPhoto(noteIds) {
     return { done: rows.length, asked: (noteIds || []).length };
   } finally { lock.releaseLock(); }
 }
-/** "Note with this photo": a new Inbox note with the picture in it (1600 px copy), a link to the original, the photo's tags, and room to write. */
-function api_photoToNote(fileId, extraTags) {
-  var p = photoRows_().filter(function (x) { return x.id === fileId; })[0];
-  var m = JSON.parse(driveGet_(encodeURIComponent(fileId) + '?fields=name,mimeType,thumbnailLink,webViewLink&supportsAllDrives=true').getContentText());
-  var d = p && /^\d{4}-\d\d-\d\d/.test(p.taken) ? p.taken.slice(0, 10) : '';
-  var title = 'Photo' + (d ? ' — ' + d : '') + (p && p.town ? ' — ' + p.town : '');
-  var tags = p ? p.tags.slice() : [];
-  (extraTags || []).forEach(function (t) { if (t && t !== 'Document' && tags.indexOf(t) < 0) tags.push(t); });
-  var n = api_createNote(title, '', tags), doc = DocumentApp.openById(n.docId), body = doc.getBody();
-  try {
-    var img = UrlFetchApp.fetch(String(m.thumbnailLink).replace(/=s\d+$/, '=s1600'), { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
-    if (img.getResponseCode() === 200) {
-      var par = body.appendParagraph(''), im = par.appendInlineImage(img.getBlob());
-      var w = im.getWidth(), h = im.getHeight(), mw = 480; if (w > mw) { im.setWidth(mw); im.setHeight(Math.round(h * mw / w)); }
-    }
-  } catch (e) {}
-  body.appendParagraph('Original photo: ').appendText(m.name || 'open').setLinkUrl(m.webViewLink || ('https://drive.google.com/file/d/' + fileId + '/view'));
+/** "Note with this photo" / "Note with these photos": a new Inbox note with the pictures in it (1600 px copies), a link to each original,
+ * the photos' tags (plus extraTags, minus Document), and room to write. fileIds: one id or a list (up to 20). */
+function api_photoToNote(fileIds, extraTags) {
+  var ids = (Array.isArray(fileIds) ? fileIds : [fileIds]).filter(String).slice(0, 20); if (!ids.length) throw new Error('No photos');
+  var rows = {}; photoRows_().forEach(function (x) { rows[x.id] = x; });
+  var ps = ids.map(function (id) { return rows[id]; }).filter(Boolean);
+  var dates = ps.map(function (p) { return /^\d{4}-\d\d-\d\d/.test(p.taken) ? p.taken.slice(0, 10) : ''; }).filter(String).sort();
+  var town = (ps.filter(function (p) { return p.town; })[0] || {}).town || '';
+  var d = dates.length ? (dates[0] === dates[dates.length - 1] ? dates[0] : dates[0] + ' to ' + dates[dates.length - 1]) : '';
+  var title = (ids.length > 1 ? ids.length + ' photos' : 'Photo') + (d ? ' — ' + d : '') + (town ? ' — ' + town : '');
+  var tags = [];
+  ps.forEach(function (p) { p.tags.forEach(function (t) { if (tags.indexOf(t) < 0) tags.push(t); }); });
+  (extraTags || []).forEach(function (t) { if (t && tags.indexOf(t) < 0) tags.push(t); });
+  tags = tags.filter(function (t) { return t !== 'Document' && t !== VIDEO_TAG; });
+  var n = api_createNote(title, '', tags), doc = DocumentApp.openById(n.docId), body = doc.getBody(), tok = ScriptApp.getOAuthToken();
+  ids.forEach(function (id, k) {
+    var m = {}; try { m = JSON.parse(driveGet_(encodeURIComponent(id) + '?fields=name,mimeType,thumbnailLink,webViewLink&supportsAllDrives=true').getContentText()); } catch (e) {}
+    try {
+      var img = m.thumbnailLink ? UrlFetchApp.fetch(String(m.thumbnailLink).replace(/=s\d+$/, '=s1600'), { headers: { Authorization: 'Bearer ' + tok }, muteHttpExceptions: true }) : null;
+      if (img && img.getResponseCode() === 200) {
+        var im = body.appendParagraph('').appendInlineImage(img.getBlob());
+        var w = im.getWidth(), h = im.getHeight(), mw = 480; if (w > mw) { im.setWidth(mw); im.setHeight(Math.round(h * mw / w)); }
+      }
+    } catch (e) {}
+    body.appendParagraph(ids.length > 1 ? 'Photo ' + (k + 1) + ': ' : 'Original photo: ').appendText(m.name || 'open').setLinkUrl(m.webViewLink || ('https://drive.google.com/file/d/' + id + '/view'));
+  });
   body.appendParagraph('');
-  try { var c1 = body.getChild(1); if (c1.getType() === DocumentApp.ElementType.PARAGRAPH && !c1.asParagraph().getText() && body.getNumChildren() > 3 && c1.asParagraph().getNumChildren() === 0) body.removeChild(c1); } catch (e) {}
+  try { var c1 = body.getChild(1); if (c1.getType() === DocumentApp.ElementType.PARAGRAPH && !c1.asParagraph().getText() && c1.asParagraph().getNumChildren() === 0 && body.getNumChildren() > 3) body.removeChild(c1); } catch (e) {}
   doc.saveAndClose();
   return { id: n.id };
 }
