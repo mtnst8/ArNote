@@ -2615,10 +2615,12 @@ function api_justPhoto(noteIds) {
   } finally { lock.releaseLock(); }
 }
 /** "Note with this photo" / "Note with these photos": a new Inbox note with the pictures in it (1600 px copies), a link to each original,
- * the photos' tags (plus extraTags, minus Document), and room to write. fileIds: one id or a list (up to 20). */
+ * the photos' tags (plus extraTags, minus Document), and room to write. fileIds: one id or a list (up to 20).
+ * Built in one pass (all Drive lookups and pictures fetched together, the Doc opened once) and returned ready for the app to show. */
 function api_photoToNote(fileIds, extraTags) {
   var ids = (Array.isArray(fileIds) ? fileIds : [fileIds]).filter(String).slice(0, 20); if (!ids.length) throw new Error('No photos');
-  var rows = {}; photoRows_().forEach(function (x) { rows[x.id] = x; });
+  var want = {}; ids.forEach(function (id) { want[id] = 1; });
+  var rows = {}; photoRows_().forEach(function (x) { if (want[x.id]) rows[x.id] = x; });
   var ps = ids.map(function (id) { return rows[id]; }).filter(Boolean);
   var dates = ps.map(function (p) { return /^\d{4}-\d\d-\d\d/.test(p.taken) ? p.taken.slice(0, 10) : ''; }).filter(String).sort();
   var town = (ps.filter(function (p) { return p.town; })[0] || {}).town || '';
@@ -2628,22 +2630,25 @@ function api_photoToNote(fileIds, extraTags) {
   ps.forEach(function (p) { p.tags.forEach(function (t) { if (tags.indexOf(t) < 0) tags.push(t); }); });
   (extraTags || []).forEach(function (t) { if (t && tags.indexOf(t) < 0) tags.push(t); });
   tags = tags.filter(function (t) { return t !== 'Document' && t !== VIDEO_TAG; });
-  var n = api_createNote(title, '', tags), doc = DocumentApp.openById(n.docId), body = doc.getBody(), tok = ScriptApp.getOAuthToken();
+  var tok = ScriptApp.getOAuthToken(), h = { Authorization: 'Bearer ' + tok };
+  var metas = UrlFetchApp.fetchAll(ids.map(function (id) { return { url: 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id) + '?fields=name,thumbnailLink,webViewLink&supportsAllDrives=true', headers: h, muteHttpExceptions: true }; }))
+    .map(function (r) { try { return r.getResponseCode() === 200 ? JSON.parse(r.getContentText()) : {}; } catch (e) { return {}; } });
+  var want2 = metas.map(function (m, i) { return m.thumbnailLink ? i : -1; }).filter(function (i) { return i >= 0; });
+  var imgs = {}, got = want2.length ? UrlFetchApp.fetchAll(want2.map(function (i) { return { url: String(metas[i].thumbnailLink).replace(/=s\d+$/, '=s1600'), headers: h, muteHttpExceptions: true }; })) : [];
+  got.forEach(function (r, k) { if (r.getResponseCode() === 200) imgs[want2[k]] = r.getBlob(); });
+  var doc = DocumentApp.create(title), body = doc.getBody();
+  body.getChild(0).asParagraph().setText(headerLine_('Inbox', tags));
   ids.forEach(function (id, k) {
-    var m = {}; try { m = JSON.parse(driveGet_(encodeURIComponent(id) + '?fields=name,mimeType,thumbnailLink,webViewLink&supportsAllDrives=true').getContentText()); } catch (e) {}
-    try {
-      var img = m.thumbnailLink ? UrlFetchApp.fetch(String(m.thumbnailLink).replace(/=s\d+$/, '=s1600'), { headers: { Authorization: 'Bearer ' + tok }, muteHttpExceptions: true }) : null;
-      if (img && img.getResponseCode() === 200) {
-        var im = body.appendParagraph('').appendInlineImage(img.getBlob());
-        var w = im.getWidth(), h = im.getHeight(), mw = 480; if (w > mw) { im.setWidth(mw); im.setHeight(Math.round(h * mw / w)); }
-      }
-    } catch (e) {}
+    var m = metas[k] || {};
+    if (imgs[k]) { try { var im = body.appendParagraph('').appendInlineImage(imgs[k]); var w = im.getWidth(), hh = im.getHeight(), mw = 480; if (w > mw) { im.setWidth(mw); im.setHeight(Math.round(hh * mw / w)); } } catch (e) {} }
     body.appendParagraph(ids.length > 1 ? 'Photo ' + (k + 1) + ': ' : 'Original photo: ').appendText(m.name || 'open').setLinkUrl(m.webViewLink || ('https://drive.google.com/file/d/' + id + '/view'));
   });
   body.appendParagraph('');
-  try { var c1 = body.getChild(1); if (c1.getType() === DocumentApp.ElementType.PARAGRAPH && !c1.asParagraph().getText() && c1.asParagraph().getNumChildren() === 0 && body.getNumChildren() > 3) body.removeChild(c1); } catch (e) {}
   doc.saveAndClose();
-  return { id: n.id };
+  DriveApp.getFileById(doc.getId()).moveTo(DriveApp.getFolderById(props_().getProperty('notesId')));
+  var now = new Date(), nid = Utilities.getUuid();
+  ss_().getSheetByName('Notes').appendRow(noteToRow_({ id: nid, title: title, notebook: 'Inbox', tags: tags.join(TAG_SEP), created: now, updated: now, docId: doc.getId(), starred: false, source: 'arenote', sourceUrl: '', author: '', attachments: 0 }));
+  return { id: nid, note: { id: nid, title: title, notebook: 'Inbox', tags: tags, created: now.toISOString(), updated: now.toISOString(), docId: doc.getId(), starred: false, att: 0, sourceUrl: '', link: false } };
 }
 /** A note in the Inbox that points at the photo (no copy). */
 function photoNote_(fileId, title, tags) {

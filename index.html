@@ -556,8 +556,12 @@ function pvLock(){var pv=$('#pv');if(!pv)return;var n=G?0:Object.keys(S.sel).len
 /** Notes ArNote made from scanning a photo (they can go back to being just a photo). */
 function isScanNote(n){return !!(n&&n.link&&(['Document','Receipt','Business Card'].some(function(t){return n.tags.indexOf(t)>=0})||/^(Document|Receipt|Business card) —/i.test(n.title)||n.author===S.user&&/drive\.google\.com\/file\//.test(n.sourceUrl||'')&&!n.att))}
 /** A scanned-photo note → a real note with the picture in it (keeps its tags, minus Document); the scan note goes away. */
+/** A note the server just made: show it straight away instead of reloading every note. */
+function addMadeNote(r){if(r&&r.note&&!S.byId[r.id]){S.notes.unshift(r.note);S.byId[r.id]=r.note;refreshInboxCount();return Promise.resolve()}return load(true)}
+function dropLocalNote(id){S.notes=S.notes.filter(function(n){return n.id!==id});delete S.byId[id];delete S.sel[id];refreshInboxCount()}
+function openMadeNote(r,msg){go('note',r.id);setTimeout(function(){var e=$('#ehere');if(e)e.click()},500);toast(msg)}
 function noteFromScan(id,btn){var n=S.byId[id];if(!n)return;if(btn){btn.disabled=true;btn.textContent='Making the note…'}
-  call('api_photoToNote',n.docId,n.tags).then(function(r){return call('api_justPhoto',[id]).then(function(){return load(true)}).then(function(){refreshInboxCount();go('note',r.id);setTimeout(function(){var e=$('#ehere');if(e)e.click()},700);toast('Note made: write away. It\'s in your Inbox.')})})
+  call('api_photoToNote',n.docId,n.tags).then(function(r){call('api_justPhoto',[id]).catch(function(){});dropLocalNote(id);return addMadeNote(r).then(function(){openMadeNote(r,'Note made: write away. It\'s in your Inbox.')})})
   .catch(function(){if(btn){btn.disabled=false;btn.textContent='📝 Note with this photo'}})}
 function justPhoto(ids){
   ids=ids.filter(function(id){var n=S.byId[id];return n&&n.link});        // ArNote checks which ones really are your photos
@@ -2364,8 +2368,8 @@ function phPaint(){
   $('#pbScan').onclick=function(){phScan(ids)};
   $('#pbDel').onclick=function(){phDelete(ids)};
   $('#pbDl').onclick=function(){downloadPhotos(ids)};
-  $('#pbNote').onclick=function(){if(ids.length>20){toast('Up to 20 photos in one note');return}var b=this;b.disabled=true;b.textContent='Making the note…';
-    call('api_photoToNote',ids).then(function(r){P.sel={};return load(true).then(function(){go('note',r.id);setTimeout(function(){var e=$('#ehere');if(e)e.click()},700);toast('Note made with '+ids.length+' photo'+(ids.length>1?'s':'')+': write away. It\'s in your Inbox.')})}).catch(function(){b.disabled=false;b.textContent='📝 Note with these photos'})};
+  $('#pbNote').onclick=function(){if(ids.length>20){toast('Up to 20 photos in one note');return}var b=this;b.disabled=true;b.textContent='Making the note… (a few seconds)';
+    call('api_photoToNote',ids).then(function(r){P.sel={};return addMadeNote(r).then(function(){openMadeNote(r,'Note made with '+ids.length+' photo'+(ids.length>1?'s':'')+': write away. It\'s in your Inbox.')})}).catch(function(){b.disabled=false;b.textContent='📝 Note with these photos'})};
 }
 /** Add photos/videos from this device: anything already in ArNote (same name and size) is skipped; the rest go straight to Drive (ArNote Photos/Phone). */
 function phAddFiles(files){
@@ -2585,8 +2589,8 @@ function phViewer(id,swapping){
   var sx=null; $('#phv .img').addEventListener('touchstart',function(e){sx=e.touches[0].clientX},{passive:true});
   $('#phv .img').addEventListener('touchend',function(e){if(sx==null)return;var dx=e.changedTouches[0].clientX-sx;sx=null;if(Math.abs(dx)>60)go2(dx<0?i+1:i-1)});
   $('#pvDl').onclick=function(){downloadPhotos([id])};
-  $('#pvNote').onclick=function(){var b=this;b.disabled=true;b.textContent='Making the note…';
-    call('api_photoToNote',id).then(function(r){return load(true).then(function(){go('note',r.id);setTimeout(function(){var e=$('#ehere');if(e)e.click()},700);toast('Note made: write away. It\'s in your Inbox.')})}).catch(function(){b.disabled=false;b.textContent='📝 Note with this photo'})};
+  $('#pvNote').onclick=function(){var b=this;b.disabled=true;b.textContent='Making the note… (a few seconds)';
+    call('api_photoToNote',id).then(function(r){return addMadeNote(r).then(function(){openMadeNote(r,'Note made: write away. It\'s in your Inbox.')})}).catch(function(){b.disabled=false;b.textContent='📝 Note with this photo'})};
   $('#pvDel').onclick=function(){var nextI=i;phDelete([id]);var f=phFlat();if(!f.length){close();return}swap();phViewer(f[Math.min(nextI,f.length-1)].id,true)};
 }
 
