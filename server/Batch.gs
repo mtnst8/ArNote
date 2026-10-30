@@ -1231,7 +1231,7 @@ function api_setMailSenders(list) {
   return mailSenders_();
 }
 /** Inbox "Check for new": everything the 15-minute job brings in, right now — email, the Drop folder, new files in linked folders,
- * and new phone photos read for receipts, cards and documents. Returns counts. (Backups, maps etc. stay on the 15-minute job.) */
+ * and photos added from the app read for receipts, cards and documents. Returns counts. (Backups, maps, the full photo-library walk stay on the 15-minute job.) */
 function api_checkNow() {
   var lock = LockService.getScriptLock(); if (!lock.tryLock(20000)) throw new Error('ArNote is busy bringing things in already; try again in a minute');
   var start = Date.now(), out = { mail: 0, files: 0, scanned: 0, ms: {} }, lap = start;
@@ -1245,7 +1245,7 @@ function api_checkNow() {
       while (di.hasNext() && Date.now() - start < 120000) { try { if (noteFromFolder_(di.next())) out.files++; } catch (e) {} }
     } catch (e) { Logger.log('Drop: ' + e); } t('drop');
     try { out.files += (processLinks_(start) || []).length; } catch (e) { Logger.log('Links: ' + e); } t('links');
-    try { syncPhotos_(Date.now() - 60000); photoIdDedupe_(); } catch (e) { Logger.log('Photos: ' + e); } t('photos');
+    // (No photo-library walk here: it takes ~40 s on a big library. App uploads are indexed at once; Photos has its own Check for new.)
     try { var q = photoRows_().filter(function (p) { return p.scan === 'q'; }).length;
       if (q && Date.now() - start < 200000) { scanQueue_(Math.max(20000, 230000 - (Date.now() - start))); out.scanned = q - photoRows_().filter(function (p) { return p.scan === 'q'; }).length; } } catch (e) { Logger.log('Scan: ' + e); } t('scan');
     return out;
