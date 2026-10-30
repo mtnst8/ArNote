@@ -1024,14 +1024,15 @@ function locHtml(loc,n){
     (loc.owner&&!loc.me?'<br><a target="_blank" href="'+esc(linkUrl(n).replace(/([?&])authuser=[^&]*/,'$1authuser='+encodeURIComponent(loc.owner)))+'">Open as '+esc(loc.owner)+' ↗</a> <span class="muted">(to edit it in the owner\'s account)</span>':'')+'</div>';
 }
 function linkUrl(n){var u=n.sourceUrl||('https://drive.google.com/file/d/'+n.docId+'/view');return u+(S.user?(u.indexOf('?')<0?'?':'&')+'authuser='+encodeURIComponent(S.user):'')}
-function upBar(){return '<div class="bar upbar"><button class="btn" id="upBtn">＋ Add files</button><button class="btn" id="lnkBtn">🔗 Link Drive files</button><button class="btn" id="mailNow" title="Bring in emails sent to ArNote right now (otherwise every 15 minutes)">✉ Check email now</button><input type="file" id="upIn" multiple hidden>'+
+function upBar(){return '<div class="bar upbar"><button class="btn" id="upBtn">＋ Add files</button><button class="btn" id="lnkBtn">🔗 Link Drive files</button><button class="btn" id="mailNow" title="Bring in everything new right now: email, the Drive Drop folder, linked folders, and phone photos of receipts, cards and documents (otherwise every 15 minutes)">⟳ Check for new</button><input type="file" id="upIn" multiple hidden>'+
   '<span class="muted">or drag files here'+(DROP_URL?' · bigger files: <a href="'+DROP_URL+'" target="_blank">Drive Drop folder</a>':'')+'</span></div>'}
 $('#camBtn').onclick=function(){$('#camIn').click()};
 $('#camIn').onchange=function(){var fs=[].slice.call(this.files);this.value='';if(fs.length)uploadFiles(fs,{open:true})};
 function bindUp(){var b=$('#upBtn'),i=$('#upIn');if(!b)return;b.onclick=function(){i.click()};if($('#lnkBtn'))$('#lnkBtn').onclick=linkDialog;if($('#mailNow'))$('#mailNow').onclick=function(){mailNow(this)};i.onchange=function(){uploadFiles([].slice.call(i.files));i.value=''}}
-function mailNow(b){if(b){b.disabled=true;b.textContent='Checking email…'}
-  call('api_mailCheckNow').then(function(r){toast(r.added?r.added+' email note'+(r.added>1?'s':'')+' added':'No new email for ArNote');return r.added?load(true).then(function(){refreshInboxCount();rerender()}):0})
-    .catch(function(e){toast(e.message)}).then(function(){var x=$('#mailNow');if(x){x.disabled=false;x.textContent='✉ Check email now'}})}
+function mailNow(b){if(b){b.disabled=true;b.textContent='Checking for new…'}
+  call('api_checkNow').then(function(r){var parts=[];if(r.mail)parts.push(r.mail+' email'+(r.mail>1?'s':''));if(r.files)parts.push(r.files+' file'+(r.files>1?'s':''));if(r.scanned)parts.push(r.scanned+' photo'+(r.scanned>1?'s':'')+' read');
+    toast(parts.length?'Brought in '+parts.join(', '):'Nothing new');return (r.mail||r.files||r.scanned)?load(true).then(function(){refreshInboxCount();rerender()}):0})
+    .catch(function(e){toast(e.message)}).then(function(){var x=$('#mailNow');if(x){x.disabled=false;x.textContent='⟳ Check for new'}})}
 /* ---------- linked Drive files ---------- */
 function linkDialog(){
   var st={where:'root',q:'',sel:{},data:null,tab:'browse'};

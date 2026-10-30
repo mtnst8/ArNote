@@ -1230,6 +1230,26 @@ function api_setMailSenders(list) {
   props_().setProperty('mailSenders', JSON.stringify(clean.filter(function (s, i) { return clean.indexOf(s) === i; })));
   return mailSenders_();
 }
+/** Inbox "Check for new": everything the 15-minute job brings in, right now — email, the Drop folder, new files in linked folders,
+ * and new phone photos read for receipts, cards and documents. Returns counts. (Backups, maps etc. stay on the 15-minute job.) */
+function api_checkNow() {
+  var lock = LockService.getScriptLock(); if (!lock.tryLock(20000)) throw new Error('ArNote is busy bringing things in already; try again in a minute');
+  var start = Date.now(), out = { mail: 0, files: 0, scanned: 0 };
+  try {
+    try { var m = processMail_(Date.now(), 60000); out.mail = (m && m.added) || 0; } catch (e) { Logger.log('Mail: ' + e); }
+    try {
+      var drop = dropFolder_(), fi = drop.getFiles();
+      while (fi.hasNext() && Date.now() - start < 120000) { try { noteFromFile_(fi.next()); out.files++; } catch (e) {} }
+      var di = drop.getFolders();
+      while (di.hasNext() && Date.now() - start < 120000) { try { if (noteFromFolder_(di.next())) out.files++; } catch (e) {} }
+    } catch (e) { Logger.log('Drop: ' + e); }
+    try { out.files += (processLinks_(start) || []).length; } catch (e) { Logger.log('Links: ' + e); }
+    try { syncPhotos_(Date.now() - 60000); photoIdDedupe_(); } catch (e) { Logger.log('Photos: ' + e); }
+    try { if (Date.now() - start < 200000) { var before = photoRows_().filter(function (p) { return p.scan === 'q'; }).length; scanQueue_(Math.max(20000, 230000 - (Date.now() - start)));
+      out.scanned = before - photoRows_().filter(function (p) { return p.scan === 'q'; }).length; } } catch (e) { Logger.log('Scan: ' + e); }
+    return out;
+  } finally { lock.releaseLock(); }
+}
 function api_mailCheckNow() {
   var lock = LockService.getScriptLock(); if (!lock.tryLock(20000)) throw new Error('ArNote is busy; try again in a minute');
   try { return processMail_(Date.now(), 150000); } finally { lock.releaseLock(); }
