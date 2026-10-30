@@ -1031,7 +1031,7 @@ $('#camIn').onchange=function(){var fs=[].slice.call(this.files);this.value='';i
 function bindUp(){var b=$('#upBtn'),i=$('#upIn');if(!b)return;b.onclick=function(){i.click()};if($('#lnkBtn'))$('#lnkBtn').onclick=linkDialog;if($('#mailNow'))$('#mailNow').onclick=function(){mailNow(this)};i.onchange=function(){uploadFiles([].slice.call(i.files));i.value=''}}
 function mailNow(b){if(b){b.disabled=true;b.textContent='Checking for new…'}
   call('api_checkNow').then(function(r){var parts=[];if(r.mail)parts.push(r.mail+' email'+(r.mail>1?'s':''));if(r.files)parts.push(r.files+' file'+(r.files>1?'s':''));if(r.scanned)parts.push(r.scanned+' photo'+(r.scanned>1?'s':'')+' read');
-    toast(parts.length?'Brought in '+parts.join(', '):'Nothing new');return (r.mail||r.files||r.scanned)?load(true).then(function(){refreshInboxCount();rerender()}):0})
+    toast(parts.length?'Brought in '+parts.join(', '):'Nothing new yet. An email you just sent can take a minute or two to arrive; try again shortly.');return (r.mail||r.files||r.scanned)?load(true).then(function(){refreshInboxCount();rerender()}):0})
     .catch(function(e){toast(e.message)}).then(function(){var x=$('#mailNow');if(x){x.disabled=false;x.textContent='⟳ Check for new'}})}
 /* ---------- linked Drive files ---------- */
 function linkDialog(){
