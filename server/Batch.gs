@@ -1234,19 +1234,20 @@ function api_setMailSenders(list) {
  * and new phone photos read for receipts, cards and documents. Returns counts. (Backups, maps etc. stay on the 15-minute job.) */
 function api_checkNow() {
   var lock = LockService.getScriptLock(); if (!lock.tryLock(20000)) throw new Error('ArNote is busy bringing things in already; try again in a minute');
-  var start = Date.now(), out = { mail: 0, files: 0, scanned: 0 };
+  var start = Date.now(), out = { mail: 0, files: 0, scanned: 0, ms: {} }, lap = start;
+  var t = function (k) { var n = Date.now(); out.ms[k] = n - lap; lap = n; };
   try {
-    try { var m = processMail_(Date.now(), 60000); out.mail = (m && m.added) || 0; } catch (e) { Logger.log('Mail: ' + e); }
+    try { var m = processMail_(Date.now(), 60000); out.mail = (m && m.added) || 0; } catch (e) { Logger.log('Mail: ' + e); } t('mail');
     try {
       var drop = dropFolder_(), fi = drop.getFiles();
       while (fi.hasNext() && Date.now() - start < 120000) { try { noteFromFile_(fi.next()); out.files++; } catch (e) {} }
       var di = drop.getFolders();
       while (di.hasNext() && Date.now() - start < 120000) { try { if (noteFromFolder_(di.next())) out.files++; } catch (e) {} }
-    } catch (e) { Logger.log('Drop: ' + e); }
-    try { out.files += (processLinks_(start) || []).length; } catch (e) { Logger.log('Links: ' + e); }
-    try { syncPhotos_(Date.now() - 60000); photoIdDedupe_(); } catch (e) { Logger.log('Photos: ' + e); }
-    try { if (Date.now() - start < 200000) { var before = photoRows_().filter(function (p) { return p.scan === 'q'; }).length; scanQueue_(Math.max(20000, 230000 - (Date.now() - start)));
-      out.scanned = before - photoRows_().filter(function (p) { return p.scan === 'q'; }).length; } } catch (e) { Logger.log('Scan: ' + e); }
+    } catch (e) { Logger.log('Drop: ' + e); } t('drop');
+    try { out.files += (processLinks_(start) || []).length; } catch (e) { Logger.log('Links: ' + e); } t('links');
+    try { syncPhotos_(Date.now() - 60000); photoIdDedupe_(); } catch (e) { Logger.log('Photos: ' + e); } t('photos');
+    try { var q = photoRows_().filter(function (p) { return p.scan === 'q'; }).length;
+      if (q && Date.now() - start < 200000) { scanQueue_(Math.max(20000, 230000 - (Date.now() - start))); out.scanned = q - photoRows_().filter(function (p) { return p.scan === 'q'; }).length; } } catch (e) { Logger.log('Scan: ' + e); } t('scan');
     return out;
   } finally { lock.releaseLock(); }
 }
