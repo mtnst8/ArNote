@@ -67,7 +67,7 @@ h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--mute)
 .rcdf{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
 .rcdf label{display:flex;flex-direction:column;font-size:12px;gap:2px;flex:1}
 @media (max-width:600px){.rcd{flex-direction:column}.rcd img{width:100%;max-height:220px}.rct{font-size:13px}.rct td,.rct th{padding:7px 6px}}
-.upbar{height:8px;border-radius:4px;background:var(--line);overflow:hidden}
+.upprog{height:8px;border-radius:4px;background:var(--line);overflow:hidden}
 #upFill{height:100%;width:0;background:var(--acc);transition:width .2s}
 .ttwrap{display:grid;grid-template-columns:270px minmax(0,1fr);gap:18px;align-items:start;margin-top:10px}
 .ttree{position:sticky;top:calc(var(--phTop,0px) + 8px);max-height:calc(100vh - 24px);overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px;background:var(--card)}
@@ -2379,7 +2379,7 @@ function phAddFiles(files){
   var total=files.length, sent=0, skipped=0, failed=[], bytes=0, done=0, ids=[], stop=false;
   files.forEach(function(f){bytes+=f.size});
   modal('Adding '+total+' item'+(total>1?'s':''),'They go to ArNote Photos › Phone in your Drive. Anything already in ArNote is skipped.',
-    '<div class="upbar"><div id="upFill"></div></div><p id="upTxt" class="muted" style="margin:8px 0 0">Starting…</p>','<span class="grow"></span><button class="btn" id="upX">Stop</button>');
+    '<div class="upprog"><div id="upFill"></div></div><p id="upTxt" class="muted" style="margin:8px 0 0">Starting…</p>','<span class="grow"></span><button class="btn" id="upX">Stop</button>');
   $('#upX').onclick=function(){stop=true;closeModal()};
   function show(){var el=$('#upTxt');if(!el)return;$('#upFill').style.width=Math.round(done/Math.max(1,bytes)*100)+'%';
     el.textContent='Uploaded '+sent+' of '+(total-skipped)+(skipped?' · '+skipped+' already in ArNote':'')+(failed.length?' · '+failed.length+' failed':'')}
