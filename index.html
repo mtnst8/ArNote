@@ -306,6 +306,7 @@ nav button svg{display:none}
 .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--mute);text-align:center;padding:18px 6px}
 .pick{max-height:50vh;overflow:auto}
 .reader{width:100%;height:75vh;border:1px solid var(--line);border-radius:10px;background:#fff}
+.pdfview{overflow:auto;background:#e9e9ec;padding:8px 12px;box-sizing:border-box;text-align:center}.pdfview canvas{display:block;margin:0 auto 10px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.25)}.pdfhead{font-size:12px;margin:0 0 8px;text-align:left;color:#555}.pdfhead a{color:#2f6f4f}
 .split .pcol .reader{height:calc(100vh - 300px);min-height:360px}
 .pin .reader{height:260px}
 .pair{max-width:520px;margin:40px auto;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px}
@@ -434,7 +435,8 @@ function prefetchNotes(ids,max){
 }
 function fillReader(frame,id,fresh){
   if(!frame) return;
-  function put(v){var h=String(v.html||'');
+  function put(v){if(v.link&&/pdf/i.test(v.link.mime||'')&&v.docId){if(frame.isConnected)frame=pdfView(frame,v);return}
+    var h=String(v.html||'');
     var extra='<base target="_blank"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{max-width:none!important;padding:14px 16px!important;margin:0!important;word-wrap:break-word}img{max-width:100%!important;height:auto!important}</style>';
     h=/<head[^>]*>/i.test(h)?h.replace(/<head[^>]*>/i,function(m){return m+extra}):extra+h;
     // Chrome doesn't always redraw when srcdoc changes on an existing frame, so swap in a fresh one
@@ -449,6 +451,28 @@ function fillReader(frame,id,fresh){
     return Promise.resolve(c);
   }
   return nvFetch(id).then(function(v){if(frame.isConnected)put(v);return v});
+}
+/* ---------- linked PDFs: the real pages, drawn in the app (bytes come through ArNote, so no Google sign-in needed) ---------- */
+var PDFC={};
+function pdfBytes(id){if(PDFC[id])return PDFC[id];
+  var parts=[],total=0;function step(off){return call('api_dlChunk',id,off).then(function(r){if(r.size>30*1048576)throw new Error('big');var u=b64Bytes(r.b64);parts.push(u);total+=u.length;return r.next!=null?step(r.next):null})}
+  return PDFC[id]=step(0).then(function(){var all=new Uint8Array(total),o=0;parts.forEach(function(u){all.set(u,o);o+=u.length});return all}).catch(function(e){delete PDFC[id];throw e})}
+function pdfView(frame,v){
+  var d=document.createElement('div');d.className=frame.className+' pdfview';frame.replaceWith(d);
+  d.innerHTML='<p class="muted" style="padding:14px">Loading the PDF…</p>';
+  var base='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+  Promise.all([loadOnce(base+'pdf.min.js'),pdfBytes(v.docId)]).then(function(x){
+    var lib=window.pdfjsLib;lib.GlobalWorkerOptions.workerSrc=base+'pdf.worker.min.js';
+    return lib.getDocument({data:x[1].slice()}).promise}).then(function(pdf){
+    if(!d.isConnected)return;var max=Math.min(pdf.numPages,30);
+    d.innerHTML='<div class="pdfhead muted">'+esc(v.link.name||'PDF')+' · '+pdf.numPages+' page'+(pdf.numPages>1?'s':'')+(pdf.numPages>max?' (showing the first '+max+')':'')+' · <a href="'+esc(v.link.url||'#')+'" target="_blank">Open in Drive ↗</a></div>';
+    var dpr=Math.min(window.devicePixelRatio||1,2);
+    (function page(i){if(i>max||!d.isConnected)return;pdf.getPage(i).then(function(pg){
+      var w=Math.max(280,d.clientWidth-24),vp1=pg.getViewport({scale:1}),vp=pg.getViewport({scale:w/vp1.width*dpr});
+      var c=document.createElement('canvas');c.width=vp.width;c.height=vp.height;c.style.width=w+'px';d.appendChild(c);
+      return pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise}).then(function(){page(i+1)}).catch(function(){})})(1);
+  }).catch(function(e){if(d.isConnected)d.innerHTML='<p class="muted" style="padding:14px">'+(e&&e.message==='big'?'This PDF is too big to show here (over 30 MB).':'Couldn\'t show this PDF here.')+' <a href="'+esc(v.link.url||'#')+'" target="_blank">Open it in Drive ↗</a></p>'});
+  return d;
 }
 function fmt(d){if(!d)return'';var x=new Date(d);return x.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})}
 function store(k,v){try{if(v===undefined)return JSON.parse(localStorage.getItem('arenote.'+k)||'null');localStorage.setItem('arenote.'+k,JSON.stringify(v))}catch(e){return null}}
